@@ -8,14 +8,12 @@ import android.opengl.Matrix;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
+import android.os.SystemClock;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
-import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 
 /**
  * Provides drawing instructions for a GLSurfaceView object. This class
@@ -55,32 +53,26 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
         mTris = new Triangle[6];
-        mTris[0] = loadTris(R.raw.tris0);
-        mTris[1] = loadTris(R.raw.tris1);
-        mTris[2] = loadTris(R.raw.tris2);
-        mTris[3] = loadTris(R.raw.tris3);
-        mTris[4] = loadTris(R.raw.tris4);
-        mTris[5] = loadTris(R.raw.tris6);
+        mTris[0] = loadTris(R.raw.tris10_0);
+        mTris[1] = loadTris(R.raw.tris0);
+        mTris[2] = loadTris(R.raw.tris1);
+        mTris[3] = loadTris(R.raw.tris2);
+        mTris[4] = loadTris(R.raw.tris3);
+        mTris[5] = loadTris(R.raw.tris4);
     }
 
     private Triangle loadTris(int resourceId) {
         try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getResources().openRawResource(resourceId), 65536))) {
-            int vertexCount = dis.readInt();
             int triCount = dis.readInt();
-            int surfaceType = dis.readInt();
 
-            float[] verts = new float[vertexCount * 3]; // 3 coords per vertex
-            for (int k = 0; k < vertexCount; ++k) {
-                verts[k*3] = dis.readInt();
-                verts[k*3+1] = dis.readInt();
-                verts[k*3+2] = 0; // z coordinate
+            float[] verts = new float[triCount * 9]; // 9 floats per triangle (3 vertices, each with x, y, type)
+            for (int k = 0; k < triCount; ++k) {
+                for (int c = 0; c < 6; ++c)
+                    verts[k*9 + c + (c/2)] = dis.readInt();
+                verts[k*9+2] = verts[k*9+5] = verts[k*9+8] = dis.readInt();
             }
 
-            int[] tris = new int[triCount * 3]; // 3 vertices per tri
-            for (int k = 0; k < triCount*3; ++k)
-                tris[k] = dis.readInt();
-
-            return new Triangle(verts, tris, surfaceType);
+            return new Triangle(verts);
         } catch (IOException ioe) {
             throw new RuntimeException("Error loading triangles", ioe);
         }
@@ -126,9 +118,25 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         // for the matrix multiplication product to be correct.
         Matrix.multiplyMM(scratch, 0, mMVPMatrix, 0, mRotationMatrix, 0);
 
+//        GLES20.glDisable(GLES20.GL_CULL_FACE);
+//        GLES20.glDisable(GLES20.GL_DEPTH_TEST);
+
         // Draw triangles
-        for (Triangle tri : mTris)
-            tri.draw(scratch);
+        GLES20.glDisable(GLES20.GL_BLEND);
+        if (scaleFactor < 8192) {
+            mTris[0].draw(scratch, 1.0f);
+        } else if (scaleFactor > 16384) {
+            for (int t = 1; t < mTris.length; ++t)
+                mTris[t].draw(scratch, 1.0f);
+        } else {
+            for (int t = 1; t < mTris.length; ++t)
+                mTris[t].draw(scratch, 1.0f);
+
+            float blend = (16384-scaleFactor)/8192;
+            GLES20.glEnable(GLES20.GL_BLEND);
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+            mTris[0].draw(scratch, blend);
+        }
     }
 
     @Override
