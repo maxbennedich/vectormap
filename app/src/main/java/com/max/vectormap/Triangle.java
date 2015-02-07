@@ -16,31 +16,39 @@ public class Triangle {
     private static final String VERTEX_SHADER =
             // This matrix member variable provides a hook to manipulate
             // the coordinates of the objects that use this vertex shader
-                    "uniform mat4 uMVPMatrix;" +
-                    "uniform float blend;" +
-                    "attribute vec4 vPosition;" +
-                    "varying vec4 vColor;" +
-                    "void main() {" +
-                    "  vColor = vec4(1., 256., 65536., 0) * vPosition.z;" +
-                    "  vColor = fract(vColor);" +
-                    "  vColor -= vColor.yzww * vec4(1./256., 1./256., 0, 0);" +
-                    "  vColor.a = blend;" +
-                    "  vec4 vNewPos = vec4(vPosition.x, vPosition.y, 0, 1);" +
-                    // the matrix must be included as a modifier of gl_Position
-                    // Note that the uMVPMatrix factor *must be first* in order
-                    // for the matrix multiplication product to be correct.
-                    "  gl_Position = uMVPMatrix * vNewPos;" +
-                    "}";
+            "uniform mat4 uMVPMatrix;" +
+            "uniform float blend;" +
+            "attribute vec4 vPosition;" +
+            "varying vec4 vColor;" +
+            "void main() {" +
+            "  vColor = vec4(1., 256., 65536., 0) * vPosition.z;" +
+            "  vColor = fract(vColor);" +
+            "  vColor -= vColor.yzww * vec4(1./256., 1./256., 0, 0);" +
+            "  vColor.a = blend;" +
+            "  vec4 vNewPos = vec4(vPosition.x, vPosition.y, 0, 1);" +
+            "  gl_Position = uMVPMatrix * vNewPos;" +
+            "  gl_PointSize = 16.;" +
+            "}";
+
+    private static final String VERTEX_SHADER_POINT =
+            "uniform mat4 uMVPMatrix;" +
+            "attribute vec4 vPosition;" +
+            "varying vec4 vColor;" +
+            "void main() {" +
+            "  vColor = vec4(1., 0., 0., 0.);" +
+            "  vec4 vNewPos = vec4(vPosition.x, vPosition.y, 0, 1);" +
+            "  gl_Position = uMVPMatrix * vNewPos;" +
+            "  gl_PointSize = 16.;" +
+            "}";
 
     private static final String FRAGMENT_SHADER =
             "precision mediump float;" +
-                    "varying vec4 vColor;" +
-                    "void main() {" +
-                    "  gl_FragColor = vColor;" +
-//                    "  gl_FragColor = vec4(vColor.r, vColor.g, vColor.b, blend);" +
-                    "}";
+            "varying vec4 vColor;" +
+            "void main() {" +
+            "  gl_FragColor = vColor;" +
+            "}";
 
-    private final int mProgram;
+    private final int mainProgram, pointProgram;
     private int mMVPMatrixHandle;
 
     private static final int BYTES_IN_FLOAT = Float.SIZE/Byte.SIZE;
@@ -87,7 +95,8 @@ public class Triangle {
 
     final int[] iboWireframe = new int[1];
 
-    private static boolean WIREFRAME = false;
+    private static boolean DRAW_WIREFRAME = false;
+    private static boolean DRAW_VERTICES = false;
 
     /** Sets up the drawing object data for use in an OpenGL ES context. */
     public Triangle(float[] verts) {
@@ -96,6 +105,7 @@ public class Triangle {
         for (int k = 2; k < verts.length; k += 3) {
             int rgb = COLORS_INT[(int) verts[k]];
             int r = rgb>>16, g = (rgb>>8)&0xff, b = rgb&0xff;
+//            r/=2; g/=2; b/=2;
             verts[k] = r/256.0f + g/65536.0f + b/16777216.0f;
         }
 
@@ -112,7 +122,7 @@ public class Triangle {
             throw new RuntimeException("Buffer error: " + vbo[0]);
         }
 
-        if (WIREFRAME) {
+        if (DRAW_WIREFRAME) {
             int[] indices = new int[vertexCount * 2];
             for (int t = 0; t < vertexCount; t += 3) {
                 indices[t*2] = indices[t*2+5] = t;
@@ -136,50 +146,40 @@ public class Triangle {
         int vertexShader = CustomGLRenderer.loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
         int fragmentShader = CustomGLRenderer.loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
 
-        mProgram = GLES20.glCreateProgram();
-        GLES20.glAttachShader(mProgram, vertexShader);
-        GLES20.glAttachShader(mProgram, fragmentShader);
-        GLES20.glLinkProgram(mProgram);
+        mainProgram = GLES20.glCreateProgram();
+        GLES20.glAttachShader(mainProgram, vertexShader);
+        GLES20.glAttachShader(mainProgram, fragmentShader);
+        GLES20.glLinkProgram(mainProgram);
+
+        if (DRAW_VERTICES) {
+            int vertexShaderPoint = CustomGLRenderer.loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER_POINT);
+            pointProgram = GLES20.glCreateProgram();
+            GLES20.glAttachShader(pointProgram, vertexShaderPoint);
+            GLES20.glAttachShader(pointProgram, fragmentShader);
+            GLES20.glLinkProgram(pointProgram);
+        } else {
+            pointProgram = -1;
+        }
 
         Log.i("PerfLog", String.format("Loaded %d tris, %d verts", verts.length/9, verts.length/3));
     }
 
     /** @param mvpMatrix - The Model View Project matrix in which to draw this shape. */
     public void draw(float[] mvpMatrix, float blend) {
-        GLES20.glUseProgram(mProgram);
-
-        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[0]);
-
-        // get handle to vertex shader's vPosition member
-        int mPositionHandle = GLES20.glGetAttribLocation(mProgram, "vPosition");
-
-        // Enable a handle to the triangle vertices
-        GLES20.glEnableVertexAttribArray(mPositionHandle);
-
-        // Prepare the triangle coordinate data
-        GLES20.glVertexAttribPointer(mPositionHandle, COORDS_PER_VERTEX, GLES20.GL_FLOAT, false, vertexStride, 0);
-
-        // set blend uniform in shader
-        int mBlendHandle = GLES20.glGetUniformLocation(mProgram, "blend");
-        GLES20.glUniform1f(mBlendHandle, blend);
-
-        // get handle to shape's transformation matrix
-        mMVPMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uMVPMatrix");
-        CustomGLRenderer.checkGlError("glGetUniformLocation");
-
-        // Apply the projection and view transformation
-        GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0);
-        CustomGLRenderer.checkGlError("glUniformMatrix4fv");
+        prepareProgram(mainProgram, mvpMatrix, blend);
 
         // Draw all triangles
-        // draw triangles (wireframes)
-//        GLES20.glDrawArrays(GLES20.GL_LINES, 0, vertexCount);
-        if (WIREFRAME) {
+        if (DRAW_WIREFRAME) {
             GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, iboWireframe[0]);
             GLES20.glDrawElements(GLES20.GL_LINES, vertexCount * 2, GLES20.GL_UNSIGNED_INT, 0);
         } else {
             // fill triangles
             GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount);
+        }
+
+        if (DRAW_VERTICES) {
+            prepareProgram(pointProgram, mvpMatrix, blend);
+            GLES20.glDrawArrays(GLES20.GL_POINTS, 0, vertexCount);
         }
 
 //        GLES20.glDrawElements(GLES20.GL_TRIANGLES, drawListCount, GLES20.GL_UNSIGNED_INT, indexBuffer);
@@ -190,5 +190,32 @@ public class Triangle {
 //        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
 
 //        GLES20.glDisableVertexAttribArray(mPositionHandle);
+    }
+
+    private void prepareProgram(int program, float[] mvpMatrix, float blend) {
+        GLES20.glUseProgram(program);
+
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[0]);
+
+        // get handle to vertex shader's vPosition member
+        int mPositionHandle = GLES20.glGetAttribLocation(program, "vPosition");
+
+        // Enable a handle to the triangle vertices
+        GLES20.glEnableVertexAttribArray(mPositionHandle);
+
+        // Prepare the triangle coordinate data
+        GLES20.glVertexAttribPointer(mPositionHandle, COORDS_PER_VERTEX, GLES20.GL_FLOAT, false, vertexStride, 0);
+
+        // set blend uniform in shader
+        int mBlendHandle = GLES20.glGetUniformLocation(program, "blend");
+        GLES20.glUniform1f(mBlendHandle, blend);
+
+        // get handle to shape's transformation matrix
+        mMVPMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix");
+        CustomGLRenderer.checkGlError("glGetUniformLocation");
+
+        // Apply the projection and view transformation
+        GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0);
+        CustomGLRenderer.checkGlError("glUniformMatrix4fv");
     }
 }

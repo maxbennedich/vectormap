@@ -14,6 +14,8 @@ import android.util.Log;
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Provides drawing instructions for a GLSurfaceView object. This class
@@ -30,7 +32,7 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
 
     private final Context context;
 
-    private Triangle[] mTris;
+    private List<Triangle> mTris = new ArrayList<>();
 
     // mMVPMatrix is an abbreviation for "Model View Projection Matrix"
     private final float[] mMVPMatrix = new float[16];
@@ -52,13 +54,12 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         // Set the background frame color
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-        mTris = new Triangle[6];
-        mTris[0] = loadTris(R.raw.tris10_0);
-        mTris[1] = loadTris(R.raw.tris0);
-        mTris[2] = loadTris(R.raw.tris1);
-        mTris[3] = loadTris(R.raw.tris2);
-        mTris[4] = loadTris(R.raw.tris3);
-        mTris[5] = loadTris(R.raw.tris4);
+        mTris.add(loadTris(R.raw.tris10_0));
+        mTris.add(loadTris(R.raw.tris0));
+        mTris.add(loadTris(R.raw.tris1));
+        mTris.add(loadTris(R.raw.tris2));
+        mTris.add(loadTris(R.raw.tris3));
+        mTris.add(loadTris(R.raw.tris4));
     }
 
     private Triangle loadTris(int resourceId) {
@@ -121,21 +122,30 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
 //        GLES20.glDisable(GLES20.GL_CULL_FACE);
 //        GLES20.glDisable(GLES20.GL_DEPTH_TEST);
 
+//        GLES20.glDisable(GLES20.GL_BLEND);
+//        GLES20.glEnable(GLES20.GL_BLEND);
+//        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE);
+//        for (int t = 1; t < mTris.size(); ++t)
+//            mTris.get(t).draw(scratch, 1.0f);
+//        mTris.get(0).draw(scratch, 1.0f);
+
+        // To test overdraw: use glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE) and half all RGB values!
+
         // Draw triangles
         GLES20.glDisable(GLES20.GL_BLEND);
         if (scaleFactor < 8192) {
-            mTris[0].draw(scratch, 1.0f);
+            mTris.get(0).draw(scratch, 1.0f);
         } else if (scaleFactor > 16384) {
-            for (int t = 1; t < mTris.length; ++t)
-                mTris[t].draw(scratch, 1.0f);
+            for (int t = 1; t < mTris.size(); ++t)
+                mTris.get(t).draw(scratch, 1.0f);
         } else {
-            for (int t = 1; t < mTris.length; ++t)
-                mTris[t].draw(scratch, 1.0f);
+            for (int t = 1; t < mTris.size(); ++t)
+                mTris.get(t).draw(scratch, 1.0f);
 
             float blend = (16384-scaleFactor)/8192;
             GLES20.glEnable(GLES20.GL_BLEND);
             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
-            mTris[0].draw(scratch, blend);
+            mTris.get(0).draw(scratch, blend);
         }
     }
 
