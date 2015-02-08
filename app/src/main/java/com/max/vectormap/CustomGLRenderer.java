@@ -15,6 +15,7 @@ import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -32,7 +33,7 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
 
     private final Context context;
 
-    private List<Triangle> mTris = new ArrayList<>();
+    private List<List<Triangle>> mTris = new ArrayList<>();
 
     // mMVPMatrix is an abbreviation for "Model View Projection Matrix"
     private final float[] mMVPMatrix = new float[16];
@@ -54,26 +55,26 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         // Set the background frame color
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-        mTris.add(loadTris(R.raw.tris10_0));
-        mTris.add(loadTris(R.raw.tris0));
-        mTris.add(loadTris(R.raw.tris1));
-        mTris.add(loadTris(R.raw.tris2));
-        mTris.add(loadTris(R.raw.tris3));
-        mTris.add(loadTris(R.raw.tris4));
+        mTris.add(Arrays.asList(loadTris(R.raw.tris0), loadTris(R.raw.tris1), loadTris(R.raw.tris2), loadTris(R.raw.tris3), loadTris(R.raw.tris4), loadTris(R.raw.tris6)));
+        mTris.add(Arrays.asList(loadTris(R.raw.tris10_0), loadTris(R.raw.tris10_1), loadTris(R.raw.tris10_2), loadTris(R.raw.tris10_3), loadTris(R.raw.tris10_4), loadTris(R.raw.tris10_6)));
+        mTris.add(Arrays.asList(loadTris(R.raw.tris1_0), loadTris(R.raw.tris1_1), loadTris(R.raw.tris1_2), loadTris(R.raw.tris1_3), loadTris(R.raw.tris1_4), loadTris(R.raw.tris1_6)));
     }
 
     private Triangle loadTris(int resourceId) {
         try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getResources().openRawResource(resourceId), 65536))) {
+            int vertexCount = dis.readInt();
             int triCount = dis.readInt();
+            int surfaceType = dis.readInt();
 
-            float[] verts = new float[triCount * 9]; // 9 floats per triangle (3 vertices, each with x, y, type)
-            for (int k = 0; k < triCount; ++k) {
-                for (int c = 0; c < 6; ++c)
-                    verts[k*9 + c + (c/2)] = dis.readInt();
-                verts[k*9+2] = verts[k*9+5] = verts[k*9+8] = dis.readInt();
-            }
+            float[] verts = new float[vertexCount * 2]; // 2 coords per vertex
+            for (int k = 0; k < vertexCount*2; ++k)
+                verts[k] = dis.readInt();
 
-            return new Triangle(verts);
+            int[] tris = new int[triCount * 3]; // 3 vertices per tri
+            for (int k = 0; k < triCount*3; ++k)
+                tris[k] = dis.readInt();
+
+            return new Triangle(verts, tris, surfaceType);
         } catch (IOException ioe) {
             throw new RuntimeException("Error loading triangles", ioe);
         }
@@ -102,21 +103,10 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         // Calculate the projection and view transformation
         Matrix.multiplyMM(mMVPMatrix, 0, mProjectionMatrix, 0, mViewMatrix, 0);
 
-//        // Draw square
-//        mSquare.draw(mMVPMatrix);
-
-        // Create a rotation for the triangle
-
-        // Use the following code to generate constant rotation.
-        // Leave this code out when using TouchEvents.
+        // Rotate scene
         // long time = SystemClock.uptimeMillis() % 4000L;
         // float angle = 0.090f * ((int) time);
-
         Matrix.setRotateM(mRotationMatrix, 0, mAngle, 0, 0, 1.0f);
-
-        // Combine the rotation matrix with the projection and camera view
-        // Note that the mMVPMatrix factor *must be first* in order
-        // for the matrix multiplication product to be correct.
         Matrix.multiplyMM(scratch, 0, mMVPMatrix, 0, mRotationMatrix, 0);
 
 //        GLES20.glDisable(GLES20.GL_CULL_FACE);
@@ -131,22 +121,37 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
 
         // To test overdraw: use glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE) and half all RGB values!
 
+        float[] layerShifts = {2048,4096, 8192,16384};
+
         // Draw triangles
         GLES20.glDisable(GLES20.GL_BLEND);
-        if (scaleFactor < 8192) {
-            mTris.get(0).draw(scratch, 1.0f);
-        } else if (scaleFactor > 16384) {
-            for (int t = 1; t < mTris.size(); ++t)
-                mTris.get(t).draw(scratch, 1.0f);
+        if (scaleFactor < layerShifts[0]) {
+            drawLayer(scratch, 2);
+        } else if (scaleFactor < layerShifts[1]) {
+            blendLayers(scratch, 1, 2, (layerShifts[1]-scaleFactor)/layerShifts[0]);
+        } else if (scaleFactor < layerShifts[2]) {
+            drawLayer(scratch, 1);
+        } else if (scaleFactor < layerShifts[3]) {
+            blendLayers(scratch, 0, 1, (layerShifts[3]-scaleFactor)/layerShifts[2]);
         } else {
-            for (int t = 1; t < mTris.size(); ++t)
-                mTris.get(t).draw(scratch, 1.0f);
-
-            float blend = (16384-scaleFactor)/8192;
-            GLES20.glEnable(GLES20.GL_BLEND);
-            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
-            mTris.get(0).draw(scratch, blend);
+            drawLayer(scratch, 0);
         }
+    }
+
+    void drawLayer(float[] mvpMatrix, int layer) { drawLayer(mvpMatrix, layer, 1.0f); }
+
+    void drawLayer(float[] mvpMatrix, int layer, float blend) {
+        for (Triangle tri : mTris.get(layer))
+            tri.draw(mvpMatrix, blend);
+    }
+
+    void blendLayers(float[] mvpMatrix, int layer1, int layer2, float blend) {
+        drawLayer(mvpMatrix, layer1);
+
+        GLES20.glEnable(GLES20.GL_BLEND);
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+        drawLayer(mvpMatrix, layer2, blend);
+        GLES20.glDisable(GLES20.GL_BLEND);
     }
 
     @Override

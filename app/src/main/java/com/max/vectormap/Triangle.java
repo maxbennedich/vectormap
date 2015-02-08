@@ -14,49 +14,39 @@ import android.util.Log;
 public class Triangle {
 
     private static final String VERTEX_SHADER =
-            // This matrix member variable provides a hook to manipulate
-            // the coordinates of the objects that use this vertex shader
             "uniform mat4 uMVPMatrix;" +
-            "uniform float blend;" +
             "attribute vec4 vPosition;" +
-            "varying vec4 vColor;" +
             "void main() {" +
-            "  vColor = vec4(1., 256., 65536., 0) * vPosition.z;" +
-            "  vColor = fract(vColor);" +
-            "  vColor -= vColor.yzww * vec4(1./256., 1./256., 0, 0);" +
-            "  vColor.a = blend;" +
-            "  vec4 vNewPos = vec4(vPosition.x, vPosition.y, 0, 1);" +
-            "  gl_Position = uMVPMatrix * vNewPos;" +
-            "  gl_PointSize = 16.;" +
+            "  gl_Position = uMVPMatrix * vPosition;" +
             "}";
 
-    private static final String VERTEX_SHADER_POINT =
-            "uniform mat4 uMVPMatrix;" +
-            "attribute vec4 vPosition;" +
-            "varying vec4 vColor;" +
-            "void main() {" +
-            "  vColor = vec4(1., 0., 0., 0.);" +
-            "  vec4 vNewPos = vec4(vPosition.x, vPosition.y, 0, 1);" +
-            "  gl_Position = uMVPMatrix * vNewPos;" +
-            "  gl_PointSize = 16.;" +
-            "}";
+//    private static final String VERTEX_SHADER_POINT =
+//            "uniform mat4 uMVPMatrix;" +
+//            "attribute vec4 vPosition;" +
+//            "varying vec4 vColor;" +
+//            "void main() {" +
+//            "  vColor = vec4(1., 0., 0., 0.);" +
+//            "  vec4 vNewPos = vec4(vPosition.x, vPosition.y, 0, 1);" +
+//            "  gl_Position = uMVPMatrix * vNewPos;" +
+//            "  gl_PointSize = 16.;" +
+//            "}";
 
     private static final String FRAGMENT_SHADER =
-            "precision mediump float;" +
-            "varying vec4 vColor;" +
+            "precision lowp float;" +
+            "uniform vec4 vColor;" +
             "void main() {" +
             "  gl_FragColor = vColor;" +
             "}";
 
-    private final int mainProgram, pointProgram;
+    private final int mainProgram; //, pointProgram;
     private int mMVPMatrixHandle;
 
     private static final int BYTES_IN_FLOAT = Float.SIZE/Byte.SIZE;
     private static final int BYTES_IN_INT = Integer.SIZE/Byte.SIZE;
 
     // number of coordinates per vertex in this array
-    private static final int COORDS_PER_VERTEX = 3;
-    private final int vertexCount;
+    private static final int COORDS_PER_VERTEX = 2;
+    private final int vertexCount, indexCount;
     private final int vertexStride = COORDS_PER_VERTEX * BYTES_IN_FLOAT;
 
     float color[];
@@ -87,42 +77,69 @@ public class Triangle {
             0x7f7f7f, // unspecified
     };
 
+    private static int[] COLORS_NEW = {
+            0xb9dcff, // water
+            0xfad999, // urban
+            0xdcddc5, // industrial
+            0xfff7a6, // farmland
+            0xffffe0, // open_land
+            0xffffff, // mountain
+            0xc2e6a2, // forest
+            0x7f7f7f, // unmapped
+            0xbfbfbf, // unclassified
+            0x7f7f7f, // unspecified
+    };
+
     private static float[] rgb(int rgb) {
         return new float[] {(rgb>>16) / 255f, (rgb>>8&0xff) / 255f, (rgb&0xff) / 255f, 0};
     }
 
     final int[] vbo = new int[1];
+    final int[] ibo = new int[1];
 
-    final int[] iboWireframe = new int[1];
-
-    private static boolean DRAW_WIREFRAME = false;
-    private static boolean DRAW_VERTICES = false;
+//    final int[] iboWireframe = new int[1];
+//
+//    private static boolean DRAW_WIREFRAME = false;
+//    private static boolean DRAW_VERTICES = false;
 
     /** Sets up the drawing object data for use in an OpenGL ES context. */
-    public Triangle(float[] verts) {
+    public Triangle(float[] verts, int[] tris, int surfaceType) {
         vertexCount = verts.length / COORDS_PER_VERTEX;
+        indexCount = tris.length;
 
-        for (int k = 2; k < verts.length; k += 3) {
-            int rgb = COLORS_INT[(int) verts[k]];
-            int r = rgb>>16, g = (rgb>>8)&0xff, b = rgb&0xff;
-//            r/=2; g/=2; b/=2;
-            verts[k] = r/256.0f + g/65536.0f + b/16777216.0f;
-        }
+        color = rgb(COLORS_NEW[surfaceType]);
+
+//        for (int k = 2; k < verts.length; k += 3) {
+//            int rgb = COLORS_INT[(int) verts[k]];
+//            int r = rgb>>16, g = (rgb>>8)&0xff, b = rgb&0xff;
+////            r/=2; g/=2; b/=2;
+//            verts[k] = r/256.0f + g/65536.0f + b/16777216.0f;
+//        }
 
         // initialize vertex byte buffer
         FloatBuffer vertexBuffer = ByteBuffer.allocateDirect(verts.length * BYTES_IN_FLOAT).order(ByteOrder.nativeOrder()).asFloatBuffer();
         vertexBuffer.put(verts).position(0);
 
+        // initialize vertex index byte buffer
+        IntBuffer indexBuffer = ByteBuffer.allocateDirect(tris.length * BYTES_IN_INT).order(ByteOrder.nativeOrder()).asIntBuffer();
+        indexBuffer.put(tris).position(0);
+
         GLES20.glGenBuffers(1, vbo, 0);
-        if (vbo[0] > 0) {
+        GLES20.glGenBuffers(1, ibo, 0);
+        if (vbo[0] > 0 && ibo[0] > 0) {
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[0]);
             GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, vertexBuffer.capacity() * BYTES_IN_FLOAT, vertexBuffer, GLES20.GL_STATIC_DRAW);
+
+            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[0]);
+            GLES20.glBufferData(GLES20.GL_ELEMENT_ARRAY_BUFFER, indexBuffer.capacity() * BYTES_IN_INT, indexBuffer, GLES20.GL_STATIC_DRAW);
+
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
         } else {
-            throw new RuntimeException("Buffer error: " + vbo[0]);
+            throw new RuntimeException("Buffer error: "+vbo[0]+","+ibo[0]);
         }
 
-        if (DRAW_WIREFRAME) {
+/*        if (DRAW_WIREFRAME) {
             int[] indices = new int[vertexCount * 2];
             for (int t = 0; t < vertexCount; t += 3) {
                 indices[t*2] = indices[t*2+5] = t;
@@ -140,7 +157,7 @@ public class Triangle {
             } else {
                 throw new RuntimeException("Buffer error: " + iboWireframe[0]);
             }
-        }
+        }*/
 
         // prepare shaders and OpenGL program
         int vertexShader = CustomGLRenderer.loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
@@ -151,7 +168,7 @@ public class Triangle {
         GLES20.glAttachShader(mainProgram, fragmentShader);
         GLES20.glLinkProgram(mainProgram);
 
-        if (DRAW_VERTICES) {
+/*        if (DRAW_VERTICES) {
             int vertexShaderPoint = CustomGLRenderer.loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER_POINT);
             pointProgram = GLES20.glCreateProgram();
             GLES20.glAttachShader(pointProgram, vertexShaderPoint);
@@ -159,7 +176,7 @@ public class Triangle {
             GLES20.glLinkProgram(pointProgram);
         } else {
             pointProgram = -1;
-        }
+        }*/
 
         Log.i("PerfLog", String.format("Loaded %d tris, %d verts", verts.length/9, verts.length/3));
     }
@@ -168,19 +185,25 @@ public class Triangle {
     public void draw(float[] mvpMatrix, float blend) {
         prepareProgram(mainProgram, mvpMatrix, blend);
 
-        // Draw all triangles
-        if (DRAW_WIREFRAME) {
-            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, iboWireframe[0]);
-            GLES20.glDrawElements(GLES20.GL_LINES, vertexCount * 2, GLES20.GL_UNSIGNED_INT, 0);
-        } else {
-            // fill triangles
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount);
-        }
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[0]);
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES, indexCount, GLES20.GL_UNSIGNED_INT, 0);
 
-        if (DRAW_VERTICES) {
-            prepareProgram(pointProgram, mvpMatrix, blend);
-            GLES20.glDrawArrays(GLES20.GL_POINTS, 0, vertexCount);
-        }
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
+
+        // Draw all triangles
+//        if (DRAW_WIREFRAME) {
+//            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, iboWireframe[0]);
+//            GLES20.glDrawElements(GLES20.GL_LINES, vertexCount * 2, GLES20.GL_UNSIGNED_INT, 0);
+//        } else {
+            // fill triangles
+//            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount);
+//        }
+
+//        if (DRAW_VERTICES) {
+//            prepareProgram(pointProgram, mvpMatrix, blend);
+//            GLES20.glDrawArrays(GLES20.GL_POINTS, 0, vertexCount);
+//        }
 
 //        GLES20.glDrawElements(GLES20.GL_TRIANGLES, drawListCount, GLES20.GL_UNSIGNED_INT, indexBuffer);
 //        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[0]);
@@ -206,9 +229,14 @@ public class Triangle {
         // Prepare the triangle coordinate data
         GLES20.glVertexAttribPointer(mPositionHandle, COORDS_PER_VERTEX, GLES20.GL_FLOAT, false, vertexStride, 0);
 
+        // get handle to fragment shader's vColor member and set color for all triangles
+        int mColorHandle = GLES20.glGetUniformLocation(program, "vColor");
+        color[3] = blend;
+        GLES20.glUniform4fv(mColorHandle, 1, color, 0);
+
         // set blend uniform in shader
-        int mBlendHandle = GLES20.glGetUniformLocation(program, "blend");
-        GLES20.glUniform1f(mBlendHandle, blend);
+//        int mBlendHandle = GLES20.glGetUniformLocation(program, "blend");
+//        GLES20.glUniform1f(mBlendHandle, blend);
 
         // get handle to shape's transformation matrix
         mMVPMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix");
