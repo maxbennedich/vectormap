@@ -18,18 +18,8 @@ public class Triangle {
             "attribute vec4 vPosition;" +
             "void main() {" +
             "  gl_Position = uMVPMatrix * vPosition;" +
-            "}";
-
-//    private static final String VERTEX_SHADER_POINT =
-//            "uniform mat4 uMVPMatrix;" +
-//            "attribute vec4 vPosition;" +
-//            "varying vec4 vColor;" +
-//            "void main() {" +
-//            "  vColor = vec4(1., 0., 0., 0.);" +
-//            "  vec4 vNewPos = vec4(vPosition.x, vPosition.y, 0, 1);" +
-//            "  gl_Position = uMVPMatrix * vNewPos;" +
 //            "  gl_PointSize = 16.;" +
-//            "}";
+            "}";
 
     private static final String FRAGMENT_SHADER =
             "precision lowp float;" +
@@ -108,6 +98,7 @@ public class Triangle {
         indexCount = tris.length;
 
         color = rgb(COLORS_NEW[surfaceType]);
+//        color[0]/=2; color[1]/=2; color[2]/=2; // for testing overdraw
 
 //        for (int k = 2; k < verts.length; k += 3) {
 //            int rgb = COLORS_INT[(int) verts[k]];
@@ -135,6 +126,8 @@ public class Triangle {
 
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
             GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
+
+//            GLES20.glDeleteBuffers(2, new int[] {vbo[0], ibo[0]}, 0);
         } else {
             throw new RuntimeException("Buffer error: "+vbo[0]+","+ibo[0]);
         }
@@ -188,6 +181,11 @@ public class Triangle {
         GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[0]);
         GLES20.glDrawElements(GLES20.GL_TRIANGLES, indexCount, GLES20.GL_UNSIGNED_INT, 0);
 
+        // drawing vertices:
+//        int mColorHandle = GLES20.glGetUniformLocation(mainProgram, "vColor");
+//        GLES20.glUniform4fv(mColorHandle, 1, new float[] {1, 0, 0, 0}, 0);
+//        GLES20.glDrawElements(GLES20.GL_POINTS, indexCount, GLES20.GL_UNSIGNED_INT, 0);
+
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
         GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
 
@@ -199,20 +197,6 @@ public class Triangle {
             // fill triangles
 //            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount);
 //        }
-
-//        if (DRAW_VERTICES) {
-//            prepareProgram(pointProgram, mvpMatrix, blend);
-//            GLES20.glDrawArrays(GLES20.GL_POINTS, 0, vertexCount);
-//        }
-
-//        GLES20.glDrawElements(GLES20.GL_TRIANGLES, drawListCount, GLES20.GL_UNSIGNED_INT, indexBuffer);
-//        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[0]);
-//        GLES20.glDrawElements(GLES20.GL_TRIANGLES, indexCount, GLES20.GL_UNSIGNED_INT, 0);
-
-//        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
-//        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
-
-//        GLES20.glDisableVertexAttribArray(mPositionHandle);
     }
 
     private void prepareProgram(int program, float[] mvpMatrix, float blend) {
@@ -227,7 +211,7 @@ public class Triangle {
         GLES20.glEnableVertexAttribArray(mPositionHandle);
 
         // Prepare the triangle coordinate data
-        GLES20.glVertexAttribPointer(mPositionHandle, COORDS_PER_VERTEX, GLES20.GL_FLOAT, false, vertexStride, 0);
+        GLES20.glVertexAttribPointer(mPositionHandle, COORDS_PER_VERTEX, GLES20.GL_FLOAT, false, 0, 0);
 
         // get handle to fragment shader's vColor member and set color for all triangles
         int mColorHandle = GLES20.glGetUniformLocation(program, "vColor");

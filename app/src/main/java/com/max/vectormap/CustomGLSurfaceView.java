@@ -42,9 +42,9 @@ class CustomGLSurfaceView extends GLSurfaceView {
         screenMidY = h * 0.5f;
     }
 
-    final int pixelToUtm(double pixel) {
+    final float pixelToUtm(float pixel) {
         // using camera
-        return (int)(pixel * 1e5 / mRenderer.scaleFactor + 0.5);
+        return pixel * 1e5f / mRenderer.scaleFactor;
     }
 
     enum ActionMode { NONE, PAN, ZOOM }
@@ -72,7 +72,7 @@ class CustomGLSurfaceView extends GLSurfaceView {
 
 //                    mapCenterUpdated();
 
-                    Log.v("Touch", "dx="+dx+", dy="+dy+", x="+mRenderer.centerUtmX+", y="+mRenderer.centerUtmY+", scale="+mRenderer.scaleFactor);
+                    Log.v("Touch", "dx="+dx+", dy="+dy+", x="+(mRenderer.centerUtmX+CustomGLRenderer.GLOBAL_OFS_X)+", y="+(mRenderer.centerUtmY+CustomGLRenderer.GLOBAL_OFS_Y)+", scale="+mRenderer.scaleFactor);
 
                     requestRender();
                 }
