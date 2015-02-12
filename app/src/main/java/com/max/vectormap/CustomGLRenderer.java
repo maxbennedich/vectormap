@@ -9,16 +9,14 @@ import android.opengl.Matrix;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
-import android.os.SystemClock;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -39,7 +37,12 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
 
     private final Context context;
 
-    private Map<Integer, List<Tile>> tileMap = new HashMap<>();
+    private LinkedHashMap<Integer, Tile> tileCache = getTileCache();
+
+    private static final int GPU_CACHE_BYTES = 20 * 1024 * 1024;
+
+    /** Contains all tile indices for which we have a tile on disk, mapped to surface types for that tile. */
+    private Map<Integer, List<Integer>> existingTiles = new HashMap<>();
 
     // mMVPMatrix is an abbreviation for "Model View Projection Matrix"
     private final float[] mMVPMatrix = new float[16];
@@ -67,16 +70,98 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         // Set the background frame color
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-        loadAllTris();
+        inventoryTris();
+    }
+
+    // TODO a cache that removes multiple entries if needed (based on size)
+    // TODO we should probably also assign weights to entries and e.g. remove large/remote/zoomed in entries first
+    private LinkedHashMap<Integer, Tile> getTileCache() {
+        return new LinkedHashMap<Integer, Tile>(64, 0.75f, true) {
+            private static final long serialVersionUID = 1L;
+
+            private long gpuBytes = 0;
+
+            /**
+             * Override get to load tiles not in the cache and insert them into the cache.
+             *
+             * @return Null if tile could not be loaded (typically out of bounds).
+             */
+            @Override public Tile get(Object key) {
+                Tile tile = super.get(key);
+                if (tile != null)
+                    return tile;
+
+                Integer tp = (Integer) key;
+                if ((tile = loadTile(tp)) != null) {
+                    put(tp, tile);
+                    gpuBytes += tile.getBytesInGPU();
+                    Log.d("Cache", "Loading tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getBytesInGPU() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024/1024)+" MB");
+                }
+                return tile;
+            }
+
+            @Override protected boolean removeEldestEntry(Entry<Integer, Tile> eldest) {
+                boolean remove = gpuBytes > GPU_CACHE_BYTES;
+                if (remove) {
+                    Tile tile = eldest.getValue();
+                    for (SurfaceTypeTile stTile : tile.tiles)
+                        stTile.tri.delete();
+                    gpuBytes -= tile.getBytesInGPU();
+                    Log.d("Cache", "Deleting tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getBytesInGPU() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024/1024)+" MB");
+                }
+                return remove;
+            }
+        };
+    }
+
+    private Tile loadTile(Integer tp) {
+        List<Integer> types = existingTiles.get(tp);
+        if (types != null && !types.isEmpty()) {
+            int layer = getLayer(tp);
+            int tx = getTX(tp), ty = getTY(tp);
+            int size = layer == 0 ? 16384 : (layer == 1 ? 65536 : (layer == 2 ? 262144 : (layer == 3 ? 1048576 : -1)));
+
+            List<SurfaceTypeTile> tiles = new ArrayList<>();
+            for (int type : types) {
+                String tileName = "tris/tri_" + size + "_" + tx + "_" + ty + "_" + type + ".tri";
+                tiles.add(new SurfaceTypeTile(tileName));
+            }
+
+            return new Tile(layer, tx, ty, tiles);
+        }
+        return null;
     }
 
     class Tile {
+        final int size;
+        final int tx, ty;
+        final List<SurfaceTypeTile> tiles;
+        final int gpuBytes;
+
+        public Tile(int size, int tx, int ty, List<SurfaceTypeTile> tiles) {
+            this.size = size;
+            this.tx = tx;
+            this.ty = ty;
+            this.tiles = tiles;
+
+            int bytes = 0;
+            for (SurfaceTypeTile t : tiles)
+                bytes += t.tri.getBytesInGPU();
+            this.gpuBytes = bytes;
+        }
+
+        int getBytesInGPU() {
+            return gpuBytes;
+        }
+    }
+
+    class SurfaceTypeTile {
         final int tx, ty;
         final int size;
         final int surfaceType;
         final Triangle tri;
 
-        public Tile(String asset) {
+        public SurfaceTypeTile(String asset) {
             try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(asset), 65536))) {
                 int vertexCount = dis.readInt();
                 int triCount = dis.readInt();
@@ -102,9 +187,9 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         }
     }
 
-    /** Load and initialize all triangle tiles from disk. */
-    private void loadAllTris() {
-        Pattern p = Pattern.compile(".+_(\\d+)_(\\d+)_(\\d+)\\.tri");
+    /** Does not load anything from disk, only inventories what's there. */
+    private void inventoryTris() {
+        Pattern p = Pattern.compile("tri_(\\d+)_(\\d+)_(\\d+)_(\\d+)\\.tri");
 
         AssetManager manager = context.getAssets();
         String[] assets;
@@ -117,19 +202,15 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         for (String asset : assets) {
             Matcher m = p.matcher(asset);
             if (m.find()) {
-                // below info is contained in the tile anyway, but eventually we want to avoid pre-loading all tiles
-//                int tx = Integer.valueOf(m.group(1));
-//                int ty = Integer.valueOf(m.group(2));
-//                int surfaceType = Integer.valueOf(m.group(3));
-                Tile tile = new Tile("tris/" + asset);
-                int layer = tile.size == 16384 ? 0 : (tile.size == 65536 ? 1 : (tile.size == 262144 ? 2 : (tile.size == 1048576 ? 3 : -1)));
-                if (layer == -1)
-                    throw new IllegalStateException("Unknown tile size: "+tile.size+" for tile <" + asset + ">");
-                int tilePos = getTilePos(layer, tile.tx, tile.ty);
-                List<Tile> tileTypes = tileMap.get(tilePos);
-                if (tileTypes == null)
-                    tileMap.put(tilePos, tileTypes = new ArrayList<>());
-                tileTypes.add(tile);
+                int size = Integer.valueOf(m.group(1));
+                int layer = size == 16384 ? 0 : (size == 65536 ? 1 : (size == 262144 ? 2 : (size == 1048576 ? 3 : -1)));
+                int tx = Integer.valueOf(m.group(2));
+                int ty = Integer.valueOf(m.group(3));
+                int tilePos = getTilePos(layer, tx, ty);
+                List<Integer> types = existingTiles.get(tilePos);
+                if (types == null)
+                    existingTiles.put(tilePos, types = new ArrayList<>());
+                types.add(Integer.valueOf(m.group(4)));
             }
         }
     }
@@ -151,6 +232,10 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         // tx/ty: 14 bits (0-16383)
         return (layer << 28) + (tx << 14) + ty;
     }
+
+    static final int getLayer(int tilePos) { return tilePos >>> 28; }
+    static final int getTX(int tilePos) { return (tilePos >> 14) & 0x3fff; }
+    static final int getTY(int tilePos) { return tilePos & 0x3fff; }
 
     /** x0, y0, x1, y1 */
     private void getScreenEdges(int[] screenEdges) {
@@ -207,10 +292,10 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
 
         for (int ty = ty0; ty <= ty1; ++ty) {
             for (int tx = tx0; tx <= tx1; ++tx) {
-                List<Tile> tiles = tileMap.get(getTilePos(layer, tx, ty));
-                if (tiles != null)
-                    for (Tile tile : tiles)
-                        tile.tri.draw(scratch, 1.0f);
+                Tile tile = tileCache.get(getTilePos(layer, tx, ty));
+                if (tile != null)
+                    for (SurfaceTypeTile stTile : tile.tiles)
+                        stTile.tri.draw(scratch, 1.0f);
             }
         }
 

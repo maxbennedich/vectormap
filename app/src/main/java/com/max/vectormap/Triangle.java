@@ -36,8 +36,9 @@ public class Triangle {
 
     // number of coordinates per vertex in this array
     private static final int COORDS_PER_VERTEX = 2;
-    private final int vertexCount, indexCount;
-    private final int vertexStride = COORDS_PER_VERTEX * BYTES_IN_FLOAT;
+    private final int indexCount;
+
+    private final int gpuBytes;
 
     float color[];
 
@@ -94,7 +95,6 @@ public class Triangle {
 
     /** Sets up the drawing object data for use in an OpenGL ES context. */
     public Triangle(float[] verts, int[] tris, int surfaceType) {
-        vertexCount = verts.length / COORDS_PER_VERTEX;
         indexCount = tris.length;
 
         color = rgb(COLORS_NEW[surfaceType]);
@@ -108,12 +108,16 @@ public class Triangle {
 //        }
 
         // initialize vertex byte buffer
-        FloatBuffer vertexBuffer = ByteBuffer.allocateDirect(verts.length * BYTES_IN_FLOAT).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        int vertexSize = verts.length * BYTES_IN_FLOAT;
+        FloatBuffer vertexBuffer = ByteBuffer.allocateDirect(vertexSize).order(ByteOrder.nativeOrder()).asFloatBuffer();
         vertexBuffer.put(verts).position(0);
 
         // initialize vertex index byte buffer
-        IntBuffer indexBuffer = ByteBuffer.allocateDirect(tris.length * BYTES_IN_INT).order(ByteOrder.nativeOrder()).asIntBuffer();
+        int indexSize = tris.length * BYTES_IN_INT;
+        IntBuffer indexBuffer = ByteBuffer.allocateDirect(indexSize).order(ByteOrder.nativeOrder()).asIntBuffer();
         indexBuffer.put(tris).position(0);
+
+        gpuBytes = vertexSize + indexSize;
 
         GLES20.glGenBuffers(1, vbo, 0);
         GLES20.glGenBuffers(1, ibo, 0);
@@ -126,8 +130,6 @@ public class Triangle {
 
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
             GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
-
-//            GLES20.glDeleteBuffers(2, new int[] {vbo[0], ibo[0]}, 0);
         } else {
             throw new RuntimeException("Buffer error: "+vbo[0]+","+ibo[0]);
         }
@@ -172,6 +174,11 @@ public class Triangle {
         }*/
 
         Log.i("PerfLog", String.format("Loaded %d tris, %d verts", verts.length/9, verts.length/3));
+    }
+
+    /** Release memory held in opengl buffers. */
+    public void delete() {
+        GLES20.glDeleteBuffers(2, new int[] {vbo[0], ibo[0]}, 0);
     }
 
     /** @param mvpMatrix - The Model View Project matrix in which to draw this shape. */
@@ -229,5 +236,9 @@ public class Triangle {
         // Apply the projection and view transformation
         GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0);
         CustomGLRenderer.checkGlError("glUniformMatrix4fv");
+    }
+
+    public int getBytesInGPU() {
+        return gpuBytes;
     }
 }
