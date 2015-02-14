@@ -11,6 +11,12 @@ import javax.microedition.khronos.opengles.GL10;
 
 import android.util.Log;
 
+import com.max.integercompression.Composition;
+import com.max.integercompression.FastPFOR;
+import com.max.integercompression.IntWrapper;
+import com.max.integercompression.IntegerCODEC;
+import com.max.integercompression.VariableByte;
+
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -161,6 +167,46 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         final int surfaceType;
         final Triangle tri;
 
+        private int[] readPFORData(DataInputStream dis, int uncompressedSize) throws IOException {
+            // read compressed data from disk
+            int compressedLength = dis.readInt();
+            int[] compressed = new int[compressedLength];
+            for (int n = 0; n < compressedLength; ++n)
+                compressed[n] = dis.readInt();
+
+            // decompress
+            IntegerCODEC codec = new Composition(new FastPFOR(), new VariableByte());
+            int[] uncompressed = new int[uncompressedSize];
+            codec.uncompress(compressed, new IntWrapper(0), compressed.length, uncompressed, new IntWrapper(0));
+
+            return uncompressed;
+        }
+
+        private int[] readBinaryPackedVertices(DataInputStream dis, BitReader br, int vertexCount) throws IOException {
+            int[] breakpoints = new int[4];
+            for (int k = 0; k < breakpoints.length; ++k)
+                breakpoints[k] = dis.readByte();
+
+            int[] uncompressed = new int[vertexCount];
+            for (int k = 0; k < vertexCount; ++k) {
+                int bitsBits = br.read(2);
+                int bits = breakpoints[bitsBits];
+                uncompressed[k] = br.read(bits);
+            }
+
+            return uncompressed;
+        }
+
+        private int[] readBinaryPackedIndices(DataInputStream dis, BitReader br, int vertexCount, int triCount) throws IOException {
+            int idxBits = log2(vertexCount);
+
+            int[] tris = new int[triCount * 3]; // 3 vertices per tri
+            for (int k = 0; k < triCount*3; ++k)
+                tris[k] = br.read(idxBits);
+
+            return tris;
+        }
+
         public SurfaceTypeTile(String asset) {
             try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(asset), 65536))) {
                 int vertexCount = dis.readInt();
@@ -170,21 +216,48 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
                 size = dis.readInt();
                 surfaceType = dis.readInt();
 
+                int ofsx = tx*size, ofsy = ty*size;
+                int QUANT_BITS = 14;
+
+                BitReader br = new BitReader(dis);
+
+//                int[] uncompressed = readPFORVertices(dis, vertexCount);
+                int[] uncompressed = readBinaryPackedVertices(dis, br, vertexCount);
+
                 float[] verts = new float[vertexCount * 2]; // 2 coords per vertex
+                int prevCoord = 0;
                 for (int k = 0; k < vertexCount*2; k += 2) {
-                    verts[k] = dis.readInt() - GLOBAL_OFS_X;
-                    verts[k+1] = dis.readInt() - GLOBAL_OFS_Y;
+                    // TODO could be solved by shifting and adding to speed things up
+                    int coord = prevCoord + uncompressed[k/2];
+                    prevCoord = coord;
+                    double qpx = coord & ((1<<QUANT_BITS)-1);
+                    double qpy = coord >> QUANT_BITS;
+                    int px = (int)(qpx / ((1<<QUANT_BITS)-1) * size + 0.5);
+                    int py = (int)(qpy / ((1<<QUANT_BITS)-1) * size + 0.5);
+                    verts[k] = px + ofsx - GLOBAL_OFS_X;
+                    verts[k + 1] = py + ofsy - GLOBAL_OFS_Y;
                 }
 
-                int[] tris = new int[triCount * 3]; // 3 vertices per tri
-                for (int k = 0; k < triCount*3; ++k)
-                    tris[k] = dis.readInt();
+//                int[] tris = readBinaryPackedIndices(dis, br, vertexCount, triCount);
+                int[] tris = readPFORData(dis, triCount * 3);
 
                 tri = new Triangle(verts, tris, surfaceType);
             } catch (IOException ioe) {
                 throw new RuntimeException("Error loading triangles", ioe);
             }
         }
+
+        private final int readb(DataInputStream dis, int b) throws IOException {
+            if (b == 1) return dis.readUnsignedByte();
+            else if (b == 2) return dis.readUnsignedShort();
+            else if (b == 4) return dis.readInt();
+            return (dis.readUnsignedByte()<<16) + dis.readUnsignedShort();
+        }
+    }
+
+    /** 0 -> 0, 1 -> 1, 2 -> 2, 3 -> 2, 4 -> 3, 5 -> 3, etc */
+    public static final int log2(int k) {
+        return 32 - Integer.numberOfLeadingZeros(k);
     }
 
     /** Does not load anything from disk, only inventories what's there. */
