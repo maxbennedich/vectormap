@@ -197,20 +197,44 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
             return uncompressed;
         }
 
-        private int[] readBinaryPackedIndices(DataInputStream dis, BitReader br, int vertexCount, int triCount) throws IOException {
-            int idxBits = log2(vertexCount);
-
-            int[] tris = new int[triCount * 3]; // 3 vertices per tri
+        private void readBinaryPackedTriIndices(BitReader br, int idxBits, int triCount, int[] tris) throws IOException {
             for (int k = 0; k < triCount*3; ++k)
                 tris[k] = br.read(idxBits);
+        }
 
-            return tris;
+        private void readBinaryPackedStripIndices(BitReader br, int idxBits, int stripCount, int[] tris, int offset, int maxIndexBits) throws IOException {
+            for (int k = 0; k < stripCount; ++k) {
+                int stripLength = br.read(maxIndexBits);
+                int v0 = br.read(idxBits), v1 = br.read(idxBits);
+                for (int t = 0; t < stripLength; ++t) {
+                    tris[offset++] = v0;
+                    tris[offset++] = v0 = v1;
+                    tris[offset++] = v1 = br.read(idxBits);
+                }
+            }
+        }
+
+        private void readBinaryPackedFanIndices(BitReader br, int idxBits, int fanCount, int[] tris, int offset, int maxIndexBits) throws IOException {
+            for (int k = 0; k < fanCount; ++k) {
+                int fanLength = br.read(maxIndexBits);
+                int v0 = br.read(idxBits), v1 = br.read(idxBits);
+                for (int t = 0; t < fanLength; ++t) {
+                    tris[offset++] = v0;
+                    tris[offset++] = v1;
+                    tris[offset++] = v1 = br.read(idxBits);
+                }
+            }
         }
 
         public SurfaceTypeTile(String asset) {
             try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(asset), 65536))) {
                 int vertexCount = dis.readInt();
                 int triCount = dis.readInt();
+                int stripCount = dis.readInt();
+                int stripTriCount = dis.readInt();
+                int fanCount = dis.readInt();
+                int fanTriCount = dis.readInt();
+                int maxIndexBits = dis.readInt();
                 tx = dis.readInt();
                 ty = dis.readInt();
                 size = dis.readInt();
@@ -238,8 +262,13 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
                     verts[k + 1] = py + ofsy - GLOBAL_OFS_Y;
                 }
 
-//                int[] tris = readBinaryPackedIndices(dis, br, vertexCount, triCount);
-                int[] tris = readPFORData(dis, triCount * 3);
+                int[] tris = new int[(triCount + stripTriCount + fanTriCount) * 3]; // 3 vertices per tri
+                int idxBits = log2(vertexCount);
+                readBinaryPackedTriIndices(br, idxBits, triCount, tris);
+                readBinaryPackedStripIndices(br, idxBits, stripCount, tris, triCount*3, maxIndexBits);
+                readBinaryPackedFanIndices(br, idxBits, fanCount, tris, (triCount + stripTriCount)*3, maxIndexBits);
+
+//                int[] tris = readPFORData(dis, triCount * 3);
 
                 tri = new Triangle(verts, tris, surfaceType);
             } catch (IOException ioe) {
