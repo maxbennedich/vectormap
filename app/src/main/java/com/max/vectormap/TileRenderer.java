@@ -155,8 +155,8 @@ public class TileRenderer {
         }*/
 
         // prepare shaders and OpenGL program
-        int vertexShader = CustomGLRenderer.loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
-        int fragmentShader = CustomGLRenderer.loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+        int vertexShader = VectorMapRenderer.loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
+        int fragmentShader = VectorMapRenderer.loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
 
         mainProgram = GLES20.glCreateProgram();
         GLES20.glAttachShader(mainProgram, vertexShader);
@@ -233,11 +233,11 @@ public class TileRenderer {
 
         // get handle to shape's transformation matrix
         mMVPMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix");
-        CustomGLRenderer.checkGlError("glGetUniformLocation");
+        VectorMapRenderer.checkGlError("glGetUniformLocation");
 
         // Apply the projection and view transformation
         GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0);
-        CustomGLRenderer.checkGlError("glUniformMatrix4fv");
+        VectorMapRenderer.checkGlError("glUniformMatrix4fv");
     }
 
     public int getBytesInGPU() {

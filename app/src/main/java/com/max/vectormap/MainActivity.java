@@ -22,7 +22,7 @@ public class MainActivity extends Activity {
 
         // Create a GLSurfaceView instance and set it
         // as the ContentView for this Activity
-        mGLView = new CustomGLSurfaceView(this);
+        mGLView = new VectorMapSurfaceView(this);
         setContentView(mGLView);
     }
 

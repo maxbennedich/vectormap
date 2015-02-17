@@ -37,7 +37,7 @@ import java.util.regex.Pattern;
  *   <li>{@link android.opengl.GLSurfaceView.Renderer#onSurfaceChanged}</li>
  * </ul>
  */
-public class CustomGLRenderer implements GLSurfaceView.Renderer {
+public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
     private static final String TAG = "MyGLRenderer";
 
@@ -68,7 +68,7 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
 
     public float centerUtmX = 400000-GLOBAL_OFS_X, centerUtmY = 6170000-GLOBAL_OFS_Y, scaleFactor = 4096;
 
-    public CustomGLRenderer(Context context) {
+    public VectorMapRenderer(Context context) {
         this.context = context;
     }
 

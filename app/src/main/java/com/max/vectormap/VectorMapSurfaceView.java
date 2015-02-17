@@ -12,11 +12,11 @@ import android.view.SurfaceHolder;
  * This view can also be used to capture touch events, such as a user
  * interacting with drawn objects.
  */
-class CustomGLSurfaceView extends GLSurfaceView {
+class VectorMapSurfaceView extends GLSurfaceView {
 
-    private final CustomGLRenderer mRenderer;
+    private final VectorMapRenderer mRenderer;
 
-    public CustomGLSurfaceView(Context context) {
+    public VectorMapSurfaceView(Context context) {
         super(context);
 
         zoomDetector = new ScaleGestureDetector(getContext(), new ScaleListener());
@@ -25,7 +25,7 @@ class CustomGLSurfaceView extends GLSurfaceView {
         setEGLContextClientVersion(2);
 
         // Set the Renderer for drawing on the GLSurfaceView
-        mRenderer = new CustomGLRenderer(context);
+        mRenderer = new VectorMapRenderer(context);
         setRenderer(mRenderer);
 
         // Render the view only when there is a change in the drawing data
@@ -72,7 +72,7 @@ class CustomGLSurfaceView extends GLSurfaceView {
 
 //                    mapCenterUpdated();
 
-                    Log.v("Touch", "dx="+dx+", dy="+dy+", x="+(mRenderer.centerUtmX+CustomGLRenderer.GLOBAL_OFS_X)+", y="+(mRenderer.centerUtmY+CustomGLRenderer.GLOBAL_OFS_Y)+", scale="+mRenderer.scaleFactor);
+                    Log.v("Touch", "dx="+dx+", dy="+dy+", x="+(mRenderer.centerUtmX+ VectorMapRenderer.GLOBAL_OFS_X)+", y="+(mRenderer.centerUtmY+ VectorMapRenderer.GLOBAL_OFS_Y)+", scale="+mRenderer.scaleFactor);
 
                     requestRender();
                 }
