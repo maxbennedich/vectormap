@@ -169,10 +169,10 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 int[] uncompressed = readBinaryPackedVertices(dis, br, vertexCount);
 
                 float[] verts = new float[vertexCount * 2]; // 2 coords per vertex
-                int prevCoord = 0;
+                int prevCoord = -1;
                 for (int k = 0; k < vertexCount*2; k += 2) {
                     // TODO could be solved by shifting and adding to speed things up
-                    int coord = prevCoord + uncompressed[k/2];
+                    int coord = prevCoord + uncompressed[k/2] + 1;
                     prevCoord = coord;
                     double qpx = coord & ((1<<QUANT_BITS)-1);
                     double qpy = coord >> QUANT_BITS;
@@ -301,9 +301,9 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         }
     }
 
-    /** 0 -> 0, 1 -> 1, 2 -> 2, 3 -> 2, 4 -> 3, 5 -> 3, etc */
+    /** 0 -> 1, 1 -> 1, 2 -> 2, 3 -> 2, 4 -> 3, 5 -> 3, etc. Note: returns 1 for k=0 since 1 bit is needed to encode 0. */
     public static final int log2(int k) {
-        return 32 - Integer.numberOfLeadingZeros(k);
+        return k == 0 ? 1 : (32 - Integer.numberOfLeadingZeros(k));
     }
 
     /** Does not load anything from disk, only inventories what's there. */

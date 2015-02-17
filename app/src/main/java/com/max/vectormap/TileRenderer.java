@@ -9,7 +9,7 @@ import android.opengl.GLES20;
 import android.util.Log;
 
 /**
- * A two-dimensional triangle for use as a drawn object in OpenGL ES 2.0.
+ * Class responsible for rendering a tile consisting of many triangles.
  */
 public class TileRenderer {
 
