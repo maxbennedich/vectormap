@@ -21,10 +21,10 @@ import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -47,8 +47,10 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
 
     private static final int GPU_CACHE_BYTES = 20 * 1024 * 1024;
 
-    /** Contains all tile indices for which we have a tile on disk, mapped to surface types for that tile. */
-    private Map<Integer, List<Integer>> existingTiles = new HashMap<>();
+    /** Contains all tile indices for which we have a tile on disk. */
+    private Set<Integer> existingTiles = new HashSet<>();
+
+    private static final int NR_SURFACE_TYPES = 10;
 
     // mMVPMatrix is an abbreviation for "Model View Projection Matrix"
     private final float[] mMVPMatrix = new float[16];
@@ -121,19 +123,83 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
     }
 
     private Tile loadTile(Integer tp) {
-        List<Integer> types = existingTiles.get(tp);
-        if (types != null && !types.isEmpty()) {
+        if (existingTiles.contains(tp)) {
             int layer = getLayer(tp);
             int tx = getTX(tp), ty = getTY(tp);
             int size = layer == 0 ? 16384 : (layer == 1 ? 65536 : (layer == 2 ? 262144 : (layer == 3 ? 1048576 : -1)));
 
-            List<SurfaceTypeTile> tiles = new ArrayList<>();
-            for (int type : types) {
-                String tileName = "tris/tri_" + size + "_" + tx + "_" + ty + "_" + type + ".tri";
-                tiles.add(new SurfaceTypeTile(tileName));
+            String tileName = "tris/tri_" + size + "_" + tx + "_" + ty + ".tri";
+            List<SurfaceTypeTile> typeTiles = new ArrayList<>();
+
+            try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(tileName), 65536))) {
+                // per tile header data
+                int vertexCount = dis.readInt();
+                tx = dis.readInt();
+                ty = dis.readInt();
+                size = dis.readInt();
+
+                // per surface type header data
+                int[] triCount = new int[NR_SURFACE_TYPES];
+                int[] stripCount = new int[NR_SURFACE_TYPES];
+                int[] stripTriCount = new int[NR_SURFACE_TYPES];
+                int[] fanCount = new int[NR_SURFACE_TYPES];
+                int[] fanTriCount = new int[NR_SURFACE_TYPES];
+                int[] primitiveCountBits = new int[NR_SURFACE_TYPES];
+                for (int t = 0; t < NR_SURFACE_TYPES; ++t) {
+                    triCount[t] = dis.readInt();
+                    stripCount[t] = dis.readInt();
+                    fanCount[t] = dis.readInt();
+                    if (triCount[t] == 0 && stripCount[t] == 0 && fanCount[t] == 0)
+                        continue;
+
+                    stripTriCount[t] = dis.readInt();
+                    fanTriCount[t] = dis.readInt();
+                    primitiveCountBits[t] = dis.readInt();
+                }
+
+                BitReader br = new BitReader(dis);
+
+                // major TODO don't duplicate vertices in all Triangle instances!
+
+                // packed vertex data; shared across ALL surface types
+                int ofsx = tx*size, ofsy = ty*size;
+                int QUANT_BITS = 14;
+
+//                int[] uncompressed = readPFORVertices(dis, vertexCount);
+                int[] uncompressed = readBinaryPackedVertices(dis, br, vertexCount);
+
+                float[] verts = new float[vertexCount * 2]; // 2 coords per vertex
+                int prevCoord = 0;
+                for (int k = 0; k < vertexCount*2; k += 2) {
+                    // TODO could be solved by shifting and adding to speed things up
+                    int coord = prevCoord + uncompressed[k/2];
+                    prevCoord = coord;
+                    double qpx = coord & ((1<<QUANT_BITS)-1);
+                    double qpy = coord >> QUANT_BITS;
+                    int px = (int)(qpx / ((1<<QUANT_BITS)-1) * size + 0.5);
+                    int py = (int)(qpy / ((1<<QUANT_BITS)-1) * size + 0.5);
+                    verts[k] = px + ofsx - GLOBAL_OFS_X;
+                    verts[k + 1] = py + ofsy - GLOBAL_OFS_Y;
+                }
+
+                // per surface type index data
+                for (int t = 0; t < NR_SURFACE_TYPES; ++t) {
+                    if (triCount[t] == 0 && stripCount[t] == 0 && fanCount[t] == 0)
+                        continue;
+                    int[] tris = new int[(triCount[t] + stripTriCount[t] + fanTriCount[t]) * 3]; // 3 vertices per tri
+                    int idxBits = log2(vertexCount);
+                    readBinaryPackedTriIndices(br, idxBits, triCount[t], tris);
+                    readBinaryPackedStripIndices(br, idxBits, stripCount[t], tris, triCount[t]*3, primitiveCountBits[t]);
+                    readBinaryPackedFanIndices(br, idxBits, fanCount[t], tris, (triCount[t] + stripTriCount[t])*3, primitiveCountBits[t]);
+//                int[] tris = readPFORData(dis, triCount * 3);
+
+                    typeTiles.add(new SurfaceTypeTile(tx, ty, size, t, new TileRenderer(verts, tris, t)));
+                }
+            } catch (IOException ioe) {
+                throw new RuntimeException("Error loading triangles", ioe);
             }
 
-            return new Tile(layer, tx, ty, tiles);
+            return new Tile(layer, tx, ty, typeTiles);
         }
         return null;
     }
@@ -165,122 +231,73 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
         final int tx, ty;
         final int size;
         final int surfaceType;
-        final Triangle tri;
+        final TileRenderer tri;
 
-        private int[] readPFORData(DataInputStream dis, int uncompressedSize) throws IOException {
-            // read compressed data from disk
-            int compressedLength = dis.readInt();
-            int[] compressed = new int[compressedLength];
-            for (int n = 0; n < compressedLength; ++n)
-                compressed[n] = dis.readInt();
+        public SurfaceTypeTile(int tx, int ty, int size, int surfaceType, TileRenderer tri) {
+            this.tx = tx;
+            this.ty = ty;
+            this.size = size;
+            this.surfaceType = surfaceType;
+            this.tri = tri;
+        }
+    }
 
-            // decompress
-            IntegerCODEC codec = new Composition(new FastPFOR(), new VariableByte());
-            int[] uncompressed = new int[uncompressedSize];
-            codec.uncompress(compressed, new IntWrapper(0), compressed.length, uncompressed, new IntWrapper(0));
+    private int[] readPFORData(DataInputStream dis, int uncompressedSize) throws IOException {
+        // read compressed data from disk
+        int compressedLength = dis.readInt();
+        int[] compressed = new int[compressedLength];
+        for (int n = 0; n < compressedLength; ++n)
+            compressed[n] = dis.readInt();
 
-            return uncompressed;
+        // decompress
+        IntegerCODEC codec = new Composition(new FastPFOR(), new VariableByte());
+        int[] uncompressed = new int[uncompressedSize];
+        codec.uncompress(compressed, new IntWrapper(0), compressed.length, uncompressed, new IntWrapper(0));
+
+        return uncompressed;
+    }
+
+    private int[] readBinaryPackedVertices(DataInputStream dis, BitReader br, int vertexCount) throws IOException {
+        int[] breakpoints = new int[4];
+        for (int k = 0; k < breakpoints.length; ++k)
+            breakpoints[k] = dis.readByte();
+
+        int[] uncompressed = new int[vertexCount];
+        for (int k = 0; k < vertexCount; ++k) {
+            int bitsBits = br.read(2);
+            int bits = breakpoints[bitsBits];
+            uncompressed[k] = br.read(bits);
         }
 
-        private int[] readBinaryPackedVertices(DataInputStream dis, BitReader br, int vertexCount) throws IOException {
-            int[] breakpoints = new int[4];
-            for (int k = 0; k < breakpoints.length; ++k)
-                breakpoints[k] = dis.readByte();
+        return uncompressed;
+    }
 
-            int[] uncompressed = new int[vertexCount];
-            for (int k = 0; k < vertexCount; ++k) {
-                int bitsBits = br.read(2);
-                int bits = breakpoints[bitsBits];
-                uncompressed[k] = br.read(bits);
-            }
+    private void readBinaryPackedTriIndices(BitReader br, int idxBits, int triCount, int[] tris) throws IOException {
+        for (int k = 0; k < triCount*3; ++k)
+            tris[k] = br.read(idxBits);
+    }
 
-            return uncompressed;
-        }
-
-        private void readBinaryPackedTriIndices(BitReader br, int idxBits, int triCount, int[] tris) throws IOException {
-            for (int k = 0; k < triCount*3; ++k)
-                tris[k] = br.read(idxBits);
-        }
-
-        private void readBinaryPackedStripIndices(BitReader br, int idxBits, int stripCount, int[] tris, int offset, int maxIndexBits) throws IOException {
-            for (int k = 0; k < stripCount; ++k) {
-                int stripLength = br.read(maxIndexBits);
-                int v0 = br.read(idxBits), v1 = br.read(idxBits);
-                for (int t = 0; t < stripLength; ++t) {
-                    tris[offset++] = v0;
-                    tris[offset++] = v0 = v1;
-                    tris[offset++] = v1 = br.read(idxBits);
-                }
-            }
-        }
-
-        private void readBinaryPackedFanIndices(BitReader br, int idxBits, int fanCount, int[] tris, int offset, int maxIndexBits) throws IOException {
-            for (int k = 0; k < fanCount; ++k) {
-                int fanLength = br.read(maxIndexBits);
-                int v0 = br.read(idxBits), v1 = br.read(idxBits);
-                for (int t = 0; t < fanLength; ++t) {
-                    tris[offset++] = v0;
-                    tris[offset++] = v1;
-                    tris[offset++] = v1 = br.read(idxBits);
-                }
+    private void readBinaryPackedStripIndices(BitReader br, int idxBits, int stripCount, int[] tris, int offset, int maxIndexBits) throws IOException {
+        for (int k = 0; k < stripCount; ++k) {
+            int stripLength = br.read(maxIndexBits);
+            int v0 = br.read(idxBits), v1 = br.read(idxBits);
+            for (int t = 0; t < stripLength; ++t) {
+                tris[offset++] = v0;
+                tris[offset++] = v0 = v1;
+                tris[offset++] = v1 = br.read(idxBits);
             }
         }
+    }
 
-        public SurfaceTypeTile(String asset) {
-            try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(asset), 65536))) {
-                int vertexCount = dis.readInt();
-                int triCount = dis.readInt();
-                int stripCount = dis.readInt();
-                int stripTriCount = dis.readInt();
-                int fanCount = dis.readInt();
-                int fanTriCount = dis.readInt();
-                int maxIndexBits = dis.readInt();
-                tx = dis.readInt();
-                ty = dis.readInt();
-                size = dis.readInt();
-                surfaceType = dis.readInt();
-
-                int ofsx = tx*size, ofsy = ty*size;
-                int QUANT_BITS = 14;
-
-                BitReader br = new BitReader(dis);
-
-//                int[] uncompressed = readPFORVertices(dis, vertexCount);
-                int[] uncompressed = readBinaryPackedVertices(dis, br, vertexCount);
-
-                float[] verts = new float[vertexCount * 2]; // 2 coords per vertex
-                int prevCoord = 0;
-                for (int k = 0; k < vertexCount*2; k += 2) {
-                    // TODO could be solved by shifting and adding to speed things up
-                    int coord = prevCoord + uncompressed[k/2];
-                    prevCoord = coord;
-                    double qpx = coord & ((1<<QUANT_BITS)-1);
-                    double qpy = coord >> QUANT_BITS;
-                    int px = (int)(qpx / ((1<<QUANT_BITS)-1) * size + 0.5);
-                    int py = (int)(qpy / ((1<<QUANT_BITS)-1) * size + 0.5);
-                    verts[k] = px + ofsx - GLOBAL_OFS_X;
-                    verts[k + 1] = py + ofsy - GLOBAL_OFS_Y;
-                }
-
-                int[] tris = new int[(triCount + stripTriCount + fanTriCount) * 3]; // 3 vertices per tri
-                int idxBits = log2(vertexCount);
-                readBinaryPackedTriIndices(br, idxBits, triCount, tris);
-                readBinaryPackedStripIndices(br, idxBits, stripCount, tris, triCount*3, maxIndexBits);
-                readBinaryPackedFanIndices(br, idxBits, fanCount, tris, (triCount + stripTriCount)*3, maxIndexBits);
-
-//                int[] tris = readPFORData(dis, triCount * 3);
-
-                tri = new Triangle(verts, tris, surfaceType);
-            } catch (IOException ioe) {
-                throw new RuntimeException("Error loading triangles", ioe);
+    private void readBinaryPackedFanIndices(BitReader br, int idxBits, int fanCount, int[] tris, int offset, int maxIndexBits) throws IOException {
+        for (int k = 0; k < fanCount; ++k) {
+            int fanLength = br.read(maxIndexBits);
+            int v0 = br.read(idxBits), v1 = br.read(idxBits);
+            for (int t = 0; t < fanLength; ++t) {
+                tris[offset++] = v0;
+                tris[offset++] = v1;
+                tris[offset++] = v1 = br.read(idxBits);
             }
-        }
-
-        private final int readb(DataInputStream dis, int b) throws IOException {
-            if (b == 1) return dis.readUnsignedByte();
-            else if (b == 2) return dis.readUnsignedShort();
-            else if (b == 4) return dis.readInt();
-            return (dis.readUnsignedByte()<<16) + dis.readUnsignedShort();
         }
     }
 
@@ -291,7 +308,7 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
 
     /** Does not load anything from disk, only inventories what's there. */
     private void inventoryTris() {
-        Pattern p = Pattern.compile("tri_(\\d+)_(\\d+)_(\\d+)_(\\d+)\\.tri");
+        Pattern p = Pattern.compile("tri_(\\d+)_(\\d+)_(\\d+)\\.tri");
 
         AssetManager manager = context.getAssets();
         String[] assets;
@@ -309,10 +326,7 @@ public class CustomGLRenderer implements GLSurfaceView.Renderer {
                 int tx = Integer.valueOf(m.group(2));
                 int ty = Integer.valueOf(m.group(3));
                 int tilePos = getTilePos(layer, tx, ty);
-                List<Integer> types = existingTiles.get(tilePos);
-                if (types == null)
-                    existingTiles.put(tilePos, types = new ArrayList<>());
-                types.add(Integer.valueOf(m.group(4)));
+                existingTiles.add(tilePos);
             }
         }
     }

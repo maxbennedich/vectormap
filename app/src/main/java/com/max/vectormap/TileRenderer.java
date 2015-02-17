@@ -11,7 +11,7 @@ import android.util.Log;
 /**
  * A two-dimensional triangle for use as a drawn object in OpenGL ES 2.0.
  */
-public class Triangle {
+public class TileRenderer {
 
     private static final String VERTEX_SHADER =
             "uniform mat4 uMVPMatrix;" +
@@ -94,7 +94,7 @@ public class Triangle {
 //    private static boolean DRAW_VERTICES = false;
 
     /** Sets up the drawing object data for use in an OpenGL ES context. */
-    public Triangle(float[] verts, int[] tris, int surfaceType) {
+    public TileRenderer(float[] verts, int[] tris, int surfaceType) {
         indexCount = tris.length;
 
         color = rgb(COLORS_NEW[surfaceType]);
@@ -206,6 +206,8 @@ public class Triangle {
 //        }
     }
 
+    // TODO things started crashing in the method below (when accessing the program) when I started
+    // to load tiles dynamically, i.e. not preload all the content
     private void prepareProgram(int program, float[] mvpMatrix, float blend) {
         GLES20.glUseProgram(program);
 
