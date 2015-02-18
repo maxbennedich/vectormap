@@ -21,9 +21,11 @@ import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,12 +47,10 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
     private LinkedHashMap<Integer, Tile> tileCache = getTileCache();
 
-    private static final int GPU_CACHE_BYTES = 20 * 1024 * 1024;
+    private static final int GPU_CACHE_BYTES = 20 * 1024 * 1024 * 100;
 
     /** Contains all tile indices for which we have a tile on disk. */
     private Set<Integer> existingTiles = new HashSet<>();
-
-    private static final int NR_SURFACE_TYPES = 10;
 
     // mMVPMatrix is an abbreviation for "Model View Projection Matrix"
     private final float[] mMVPMatrix = new float[16];
@@ -103,7 +103,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 if ((tile = loadTile(tp)) != null) {
                     put(tp, tile);
                     gpuBytes += tile.getBytesInGPU();
-                    Log.d("Cache", "Loading tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getBytesInGPU() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024/1024)+" MB");
+                    Log.d("Cache", "Loading tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getBytesInGPU() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024)+" KB");
                 }
                 return tile;
             }
@@ -112,10 +112,9 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 boolean remove = gpuBytes > GPU_CACHE_BYTES;
                 if (remove) {
                     Tile tile = eldest.getValue();
-                    for (SurfaceTypeTile stTile : tile.tiles)
-                        stTile.tri.delete();
+                    tile.tile.delete();
                     gpuBytes -= tile.getBytesInGPU();
-                    Log.d("Cache", "Deleting tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getBytesInGPU() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024/1024)+" MB");
+                    Log.d("Cache", "Deleting tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getBytesInGPU() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024)+" KB");
                 }
                 return remove;
             }
@@ -129,7 +128,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
             int size = layer == 0 ? 16384 : (layer == 1 ? 65536 : (layer == 2 ? 262144 : (layer == 3 ? 1048576 : -1)));
 
             String tileName = "tris/tri_" + size + "_" + tx + "_" + ty + ".tri";
-            List<SurfaceTypeTile> typeTiles = new ArrayList<>();
+//            List<SurfaceTypeTile> typeTiles = new ArrayList<>();
 
             try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(tileName), 65536))) {
                 // per tile header data
@@ -139,13 +138,13 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 size = dis.readInt();
 
                 // per surface type header data
-                int[] triCount = new int[NR_SURFACE_TYPES];
-                int[] stripCount = new int[NR_SURFACE_TYPES];
-                int[] stripTriCount = new int[NR_SURFACE_TYPES];
-                int[] fanCount = new int[NR_SURFACE_TYPES];
-                int[] fanTriCount = new int[NR_SURFACE_TYPES];
-                int[] primitiveCountBits = new int[NR_SURFACE_TYPES];
-                for (int t = 0; t < NR_SURFACE_TYPES; ++t) {
+                int[] triCount = new int[Constants.NR_SURFACE_TYPES];
+                int[] stripCount = new int[Constants.NR_SURFACE_TYPES];
+                int[] stripTriCount = new int[Constants.NR_SURFACE_TYPES];
+                int[] fanCount = new int[Constants.NR_SURFACE_TYPES];
+                int[] fanTriCount = new int[Constants.NR_SURFACE_TYPES];
+                int[] primitiveCountBits = new int[Constants.NR_SURFACE_TYPES];
+                for (int t = 0; t < Constants.NR_SURFACE_TYPES; ++t) {
                     triCount[t] = dis.readInt();
                     stripCount[t] = dis.readInt();
                     fanCount[t] = dis.readInt();
@@ -182,8 +181,10 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                     verts[k + 1] = py + ofsy - GLOBAL_OFS_Y;
                 }
 
+                Map<Integer, int[]> trisByType = new LinkedHashMap<>();
+
                 // per surface type index data
-                for (int t = 0; t < NR_SURFACE_TYPES; ++t) {
+                for (int t = 0; t < Constants.NR_SURFACE_TYPES; ++t) {
                     if (triCount[t] == 0 && stripCount[t] == 0 && fanCount[t] == 0)
                         continue;
                     int[] tris = new int[(triCount[t] + stripTriCount[t] + fanTriCount[t]) * 3]; // 3 vertices per tri
@@ -193,13 +194,15 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                     readBinaryPackedFanIndices(br, idxBits, fanCount[t], tris, (triCount[t] + stripTriCount[t])*3, primitiveCountBits[t]);
 //                int[] tris = readPFORData(dis, triCount * 3);
 
-                    typeTiles.add(new SurfaceTypeTile(tx, ty, size, t, new TileRenderer(verts, tris, t)));
+                    trisByType.put(t, tris);
                 }
+
+                return new Tile(layer, tx, ty, new TileRenderer(verts, trisByType));
             } catch (IOException ioe) {
                 throw new RuntimeException("Error loading triangles", ioe);
             }
 
-            return new Tile(layer, tx, ty, typeTiles);
+//            typeTiles.add(new SurfaceTypeTile(tx, ty, size, t, new TileRenderer(verts, tris, t)));
         }
         return null;
     }
@@ -207,19 +210,15 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
     class Tile {
         final int size;
         final int tx, ty;
-        final List<SurfaceTypeTile> tiles;
+        final TileRenderer tile;
         final int gpuBytes;
 
-        public Tile(int size, int tx, int ty, List<SurfaceTypeTile> tiles) {
+        public Tile(int size, int tx, int ty, TileRenderer tile) {
             this.size = size;
             this.tx = tx;
             this.ty = ty;
-            this.tiles = tiles;
-
-            int bytes = 0;
-            for (SurfaceTypeTile t : tiles)
-                bytes += t.tri.getBytesInGPU();
-            this.gpuBytes = bytes;
+            this.tile = tile;
+            this.gpuBytes = tile.getBytesInGPU();
         }
 
         int getBytesInGPU() {
@@ -227,20 +226,20 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         }
     }
 
-    class SurfaceTypeTile {
-        final int tx, ty;
-        final int size;
-        final int surfaceType;
-        final TileRenderer tri;
-
-        public SurfaceTypeTile(int tx, int ty, int size, int surfaceType, TileRenderer tri) {
-            this.tx = tx;
-            this.ty = ty;
-            this.size = size;
-            this.surfaceType = surfaceType;
-            this.tri = tri;
-        }
-    }
+//    class SurfaceTypeTile {
+//        final int tx, ty;
+//        final int size;
+//        final int surfaceType;
+//        final TileRenderer tri;
+//
+//        public SurfaceTypeTile(int tx, int ty, int size, int surfaceType, TileRenderer tri) {
+//            this.tx = tx;
+//            this.ty = ty;
+//            this.size = size;
+//            this.surfaceType = surfaceType;
+//            this.tri = tri;
+//        }
+//    }
 
     private int[] readPFORData(DataInputStream dis, int uncompressedSize) throws IOException {
         // read compressed data from disk
@@ -406,14 +405,19 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
         Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
 
-        for (int ty = ty0; ty <= ty1; ++ty) {
-            for (int tx = tx0; tx <= tx1; ++tx) {
-                Tile tile = tileCache.get(getTilePos(layer, tx, ty));
-                if (tile != null)
-                    for (SurfaceTypeTile stTile : tile.tiles)
-                        stTile.tri.draw(scratch, 1.0f);
-            }
+        for (int tp : existingTiles) {
+            Tile tile = tileCache.get(tp);
+            if (tile != null)
+                tile.tile.draw(scratch, 1.0f);
         }
+//        for (int ty = ty0; ty <= ty1; ++ty) {
+//            for (int tx = tx0; tx <= tx1; ++tx) {
+//                Tile tile = tileCache.get(getTilePos(layer, tx, ty));
+//                if (tile != null)
+//                    for (SurfaceTypeTile stTile : tile.tiles)
+//                        stTile.tri.draw(scratch, 1.0f);
+//            }
+//        }
 
 
 //        float[] layerShifts = {2048,4096, 8192,16384};
