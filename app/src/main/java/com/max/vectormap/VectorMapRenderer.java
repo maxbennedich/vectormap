@@ -20,11 +20,9 @@ import com.max.integercompression.VariableByte;
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -121,6 +119,19 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         };
     }
 
+    public static final int hash(int x) {
+        x = ((x >>> 16) ^ x) * 0x45d9f3b;
+        x = ((x >>> 16) ^ x) * 0x45d9f3b;
+        x = ((x >>> 16) ^ x);
+        return x;
+    }
+
+    final int HASH_SIZE = 16384;
+    final int BUCKET_BITS = 5;
+    final int BUCKET_SIZE = 1 << BUCKET_BITS;
+    int[] bucketLen = new int[HASH_SIZE];
+    int[] hashMap = new int[HASH_SIZE << BUCKET_BITS];
+
     private Tile loadTile(Integer tp) {
         if (existingTiles.contains(tp)) {
             int layer = getLayer(tp);
@@ -128,7 +139,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
             int size = layer == 0 ? 16384 : (layer == 1 ? 65536 : (layer == 2 ? 262144 : (layer == 3 ? 1048576 : -1)));
 
             String tileName = "tris/tri_" + size + "_" + tx + "_" + ty + ".tri";
-//            List<SurfaceTypeTile> typeTiles = new ArrayList<>();
 
             try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(tileName), 65536))) {
                 // per tile header data
@@ -158,28 +168,8 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
                 BitReader br = new BitReader(dis);
 
-                // major TODO don't duplicate vertices in all Triangle instances!
-
-                // packed vertex data; shared across ALL surface types
-                int ofsx = tx*size, ofsy = ty*size;
-                int QUANT_BITS = 14;
-
 //                int[] uncompressed = readPFORVertices(dis, vertexCount);
-                int[] uncompressed = readBinaryPackedVertices(dis, br, vertexCount);
-
-                float[] verts = new float[vertexCount * 2]; // 2 coords per vertex
-                int prevCoord = -1;
-                for (int k = 0; k < vertexCount*2; k += 2) {
-                    // TODO could be solved by shifting and adding to speed things up
-                    int coord = prevCoord + uncompressed[k/2] + 1;
-                    prevCoord = coord;
-                    double qpx = coord & ((1<<QUANT_BITS)-1);
-                    double qpy = coord >> QUANT_BITS;
-                    int px = (int)(qpx / ((1<<QUANT_BITS)-1) * size + 0.5);
-                    int py = (int)(qpy / ((1<<QUANT_BITS)-1) * size + 0.5);
-                    verts[k] = px + ofsx - GLOBAL_OFS_X;
-                    verts[k + 1] = py + ofsy - GLOBAL_OFS_Y;
-                }
+                int[] uncompressedVertices = readBinaryPackedVertices(dis, br, vertexCount);
 
                 Map<Integer, int[]> trisByType = new LinkedHashMap<>();
 
@@ -197,12 +187,60 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                     trisByType.put(t, tris);
                 }
 
+                // delta-decode vertices
+                int[] intVerts = new int[vertexCount];
+                int prevCoord = -1;
+                for (int k = 0; k < vertexCount; ++k)
+                    prevCoord = intVerts[k] = prevCoord + uncompressedVertices[k] + 1;
+
+                // reorder vertices by draw order and reindex index lists
+                // using a custom hash map implementation (3 times faster than default java version)
+                int[] newOrder = new int[vertexCount];
+                int newVertexCount = 0;
+                Arrays.fill(bucketLen, 0);
+
+                for (Map.Entry<Integer, int[]> tris : trisByType.entrySet()) {
+                    for (int n = 0; n < tris.getValue().length; ++n) {
+                        int vi = intVerts[tris.getValue()[n]];
+                        int hash = hash(vi) & (HASH_SIZE-1);
+                        int bucket = hash << BUCKET_BITS;
+                        int found = -1;
+                        for (int k = 0; k < bucketLen[hash]; ++k) {
+                            int idx = hashMap[bucket+k]; // <-- can optimize here by explicitly storing the values in the hash map in addition
+                            if (newOrder[idx] == vi) {   //     to the indices, this will however double the space used
+                                found = idx;
+                                break;
+                            }
+                        }
+                        if (found == -1) {
+                            newOrder[newVertexCount] = vi;
+                            found = hashMap[bucket + bucketLen[hash]] = newVertexCount++;
+                            if (++bucketLen[hash] >= BUCKET_SIZE)
+                                throw new IllegalStateException("Length " + bucketLen[hash] + " for vertex count " + newVertexCount + "/" + vertexCount);
+                        }
+                        tris.getValue()[n] = found; // reindex
+                    }
+                }
+
+                // un-quantize vertices
+                float[] verts = new float[vertexCount * 2]; // 2 coords per vertex
+                int ofsx = tx*size, ofsy = ty*size;
+                int QUANT_BITS = 14;
+                int vi = 0;
+                for (int coord : newOrder) {
+                    // TODO could be solved by shifting and adding to speed things up
+                    double qpx = coord & ((1<<QUANT_BITS)-1);
+                    double qpy = coord >> QUANT_BITS;
+                    int px = (int)(qpx / ((1<<QUANT_BITS)-1) * size + 0.5);
+                    int py = (int)(qpy / ((1<<QUANT_BITS)-1) * size + 0.5);
+                    verts[vi++] = px + ofsx - GLOBAL_OFS_X;
+                    verts[vi++] = py + ofsy - GLOBAL_OFS_Y;
+                }
+
                 return new Tile(layer, tx, ty, new TileRenderer(verts, trisByType));
             } catch (IOException ioe) {
                 throw new RuntimeException("Error loading triangles", ioe);
             }
-
-//            typeTiles.add(new SurfaceTypeTile(tx, ty, size, t, new TileRenderer(verts, tris, t)));
         }
         return null;
     }
@@ -405,11 +443,15 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
         Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
 
+        TileRenderer.drawn = 0;
+
         for (int tp : existingTiles) {
             Tile tile = tileCache.get(tp);
-            if (tile != null)
+            if (tile != null && tile.size == 0)
                 tile.tile.draw(scratch, 1.0f);
         }
+
+        Log.v("View", "Triangles drawn: " + TileRenderer.drawn);
 //        for (int ty = ty0; ty <= ty1; ++ty) {
 //            for (int tx = tx0; tx <= tx1; ++tx) {
 //                Tile tile = tileCache.get(getTilePos(layer, tx, ty));

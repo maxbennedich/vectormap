@@ -4,11 +4,13 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import android.opengl.GLES20;
 import android.util.Log;
+import android.util.Pair;
 
 /**
  * Class responsible for rendering a tile consisting of many triangles.
@@ -59,6 +61,24 @@ public class TileRenderer {
 
     /** Sets up the drawing object data for use in an OpenGL ES context. */
     public TileRenderer(float[] verts, Map<Integer, int[]> trisByType) {
+//        // reorder vertices and reindex index lists
+//        Map<Pair<Float, Float>, Integer> idxByVert = new LinkedHashMap<>();
+//        for (Map.Entry<Integer, int[]> tris : trisByType.entrySet()) {
+//            for (int n = 0; n < tris.getValue().length; ++n) {
+//                int vi = tris.getValue()[n];
+//                Pair<Float, Float> v = Pair.create(verts[vi * 2], verts[vi * 2 + 1]);
+//                Integer idx = idxByVert.get(v);
+//                if (idx == null)
+//                    idxByVert.put(v, idx = idxByVert.size());
+//                tris.getValue()[n] = idx; // reindex
+//            }
+//        }
+//        int vi = 0;
+//        for (Pair<Float, Float> v : idxByVert.keySet()) {
+//            verts[vi++] = v.first;
+//            verts[vi++] = v.second;
+//        }
+
         // initialize vertex byte buffer
         int vertexSize = verts.length * Constants.BYTES_IN_FLOAT;
         FloatBuffer vertexBuffer = ByteBuffer.allocateDirect(vertexSize).order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -123,6 +143,8 @@ public class TileRenderer {
         GLES20.glDeleteBuffers(ibo.length, ibo, 0);
     }
 
+    public static int drawn = 0;
+
     /** @param mvpMatrix - The Model View Project matrix in which to draw this shape. */
     public void draw(float[] mvpMatrix, float blend) {
         prepareProgram(mainProgram, mvpMatrix);
@@ -134,6 +156,7 @@ public class TileRenderer {
 
             GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[t]);
             GLES20.glDrawElements(GLES20.GL_TRIANGLES, indexCount[t], GLES20.GL_UNSIGNED_INT, 0);
+            drawn += indexCount[t]/3;
         }
 
         // drawing vertices:
