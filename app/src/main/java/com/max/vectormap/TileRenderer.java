@@ -15,14 +15,6 @@ import android.util.Pair;
 
 /**
  * Class responsible for rendering a tile consisting of many triangles.
- * 25 fps zoomed in
- * 20 fps middle
- * 16 fps zoomed out
- * -->
- * 27 fps zoomed in
- * 22 fps middle
- * 18 fps zoomed out
- * cache size: 69059 KB
  */
 public class TileRenderer {
 
@@ -61,25 +53,7 @@ public class TileRenderer {
     }
 
     /** Sets up the drawing object data for use in an OpenGL ES context. */
-    public TileRenderer(float[] verts, Map<Integer, int[]> trisByType) {
-//        // reorder vertices and reindex index lists
-//        Map<Pair<Float, Float>, Integer> idxByVert = new LinkedHashMap<>();
-//        for (Map.Entry<Integer, int[]> tris : trisByType.entrySet()) {
-//            for (int n = 0; n < tris.getValue().length; ++n) {
-//                int vi = tris.getValue()[n];
-//                Pair<Float, Float> v = Pair.create(verts[vi * 2], verts[vi * 2 + 1]);
-//                Integer idx = idxByVert.get(v);
-//                if (idx == null)
-//                    idxByVert.put(v, idx = idxByVert.size());
-//                tris.getValue()[n] = idx; // reindex
-//            }
-//        }
-//        int vi = 0;
-//        for (Pair<Float, Float> v : idxByVert.keySet()) {
-//            verts[vi++] = v.first;
-//            verts[vi++] = v.second;
-//        }
-
+    public TileRenderer(float[] verts, Map<Integer, short[]> trisByType) {
         // initialize vertex byte buffer
         int vertexSize = verts.length * Constants.BYTES_IN_FLOAT;
         FloatBuffer vertexBuffer = ByteBuffer.allocateDirect(vertexSize).order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -101,19 +75,16 @@ public class TileRenderer {
         color = new float[trisByType.size()][];
 
         int type = 0;
-        for (Map.Entry<Integer, int[]> tris : trisByType.entrySet()) {
+        for (Map.Entry<Integer, short[]> tris : trisByType.entrySet()) {
             indexCount[type] = tris.getValue().length;
 
             color[type] = rgb(Constants.COLORS_NEW[tris.getKey()]);
 //          color[0]/=2; color[1]/=2; color[2]/=2; // for testing overdraw
 
             // initialize vertex index byte buffer
-            short[] newIdx = new short[tris.getValue().length];
-            for (int k = 0; k < tris.getValue().length; ++k)
-                newIdx[k] = (short)tris.getValue()[k];
             int indexSize = tris.getValue().length * Constants.BYTES_IN_SHORT;
             ShortBuffer indexBuffer = ByteBuffer.allocateDirect(indexSize).order(ByteOrder.nativeOrder()).asShortBuffer();
-            indexBuffer.put(newIdx).position(0);
+            indexBuffer.put(tris.getValue()).position(0);
 
             gpuBytes += indexSize;
 

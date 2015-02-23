@@ -26,4 +26,8 @@ public class BitReader {
         }
     }
 
+    short readShort(int bits) throws IOException {
+        return (short)read(bits);
+    }
+
 }

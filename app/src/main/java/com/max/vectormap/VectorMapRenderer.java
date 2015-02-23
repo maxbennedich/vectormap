@@ -129,8 +129,8 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
     final int HASH_SIZE = 16384;
     final int BUCKET_BITS = 5;
     final int BUCKET_SIZE = 1 << BUCKET_BITS;
-    int[] bucketLen = new int[HASH_SIZE];
-    int[] hashMap = new int[HASH_SIZE << BUCKET_BITS];
+    byte[] bucketLen = new byte[HASH_SIZE];
+    short[] hashMap = new short[HASH_SIZE << BUCKET_BITS];
 
     private Tile loadTile(Integer tp) {
         if (existingTiles.contains(tp)) {
@@ -143,6 +143,9 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
             try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(tileName), 65536))) {
                 // per tile header data
                 int vertexCount = dis.readInt();
+                if (vertexCount >= 65535)
+                    throw new IllegalStateException("Max vertex count is 65534, got " + vertexCount);
+
                 tx = dis.readInt();
                 ty = dis.readInt();
                 size = dis.readInt();
@@ -171,13 +174,13 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 //                int[] uncompressed = readPFORVertices(dis, vertexCount);
                 int[] uncompressedVertices = readBinaryPackedVertices(dis, br, vertexCount);
 
-                Map<Integer, int[]> trisByType = new LinkedHashMap<>();
+                Map<Integer, short[]> trisByType = new LinkedHashMap<>();
 
                 // per surface type index data
                 for (int t = 0; t < Constants.NR_SURFACE_TYPES; ++t) {
                     if (triCount[t] == 0 && stripCount[t] == 0 && fanCount[t] == 0)
                         continue;
-                    int[] tris = new int[(triCount[t] + stripTriCount[t] + fanTriCount[t]) * 3]; // 3 vertices per tri
+                    short[] tris = new short[(triCount[t] + stripTriCount[t] + fanTriCount[t]) * 3]; // 3 vertices per tri
                     int idxBits = log2(vertexCount);
                     readBinaryPackedTriIndices(br, idxBits, triCount[t], tris);
                     readBinaryPackedStripIndices(br, idxBits, stripCount[t], tris, triCount[t]*3, primitiveCountBits[t]);
@@ -197,29 +200,29 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 // using a custom hash map implementation (3 times faster than default java version)
                 int[] newOrder = new int[vertexCount];
                 int newVertexCount = 0;
-                Arrays.fill(bucketLen, 0);
+                Arrays.fill(bucketLen, (byte)0);
                 Log.d("VertexCount", ""+vertexCount);
 
-                for (Map.Entry<Integer, int[]> tris : trisByType.entrySet()) {
+                for (Map.Entry<Integer, short[]> tris : trisByType.entrySet()) {
                     for (int n = 0; n < tris.getValue().length; ++n) {
-                        int vi = intVerts[tris.getValue()[n]];
+                        int vi = intVerts[tris.getValue()[n]&0xffff];
                         int hash = hash(vi) & (HASH_SIZE-1);
                         int bucket = hash << BUCKET_BITS;
                         int found = -1;
                         for (int k = 0; k < bucketLen[hash]; ++k) {
-                            int idx = hashMap[bucket+k]; // <-- can optimize here by explicitly storing the values in the hash map in addition
-                            if (newOrder[idx] == vi) {   //     to the indices, this will however double the space used
+                            int idx = hashMap[bucket+k]&0xffff; // <-- can optimize here by explicitly storing the values in the hash map in addition
+                            if (newOrder[idx] == vi) {          //     to the indices, this will however double the space used
                                 found = idx;
                                 break;
                             }
                         }
                         if (found == -1) {
                             newOrder[newVertexCount] = vi;
-                            found = hashMap[bucket + bucketLen[hash]] = newVertexCount++;
+                            found = hashMap[bucket + bucketLen[hash]] = (short)newVertexCount++;
                             if (++bucketLen[hash] >= BUCKET_SIZE)
                                 throw new IllegalStateException("Length " + bucketLen[hash] + " for vertex count " + newVertexCount + "/" + vertexCount);
                         }
-                        tris.getValue()[n] = found; // reindex
+                        tris.getValue()[n] = (short)found; // reindex
                     }
                 }
 
@@ -265,21 +268,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         }
     }
 
-//    class SurfaceTypeTile {
-//        final int tx, ty;
-//        final int size;
-//        final int surfaceType;
-//        final TileRenderer tri;
-//
-//        public SurfaceTypeTile(int tx, int ty, int size, int surfaceType, TileRenderer tri) {
-//            this.tx = tx;
-//            this.ty = ty;
-//            this.size = size;
-//            this.surfaceType = surfaceType;
-//            this.tri = tri;
-//        }
-//    }
-
     private int[] readPFORData(DataInputStream dis, int uncompressedSize) throws IOException {
         // read compressed data from disk
         int compressedLength = dis.readInt();
@@ -310,31 +298,31 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         return uncompressed;
     }
 
-    private void readBinaryPackedTriIndices(BitReader br, int idxBits, int triCount, int[] tris) throws IOException {
+    private void readBinaryPackedTriIndices(BitReader br, int idxBits, int triCount, short[] tris) throws IOException {
         for (int k = 0; k < triCount*3; ++k)
-            tris[k] = br.read(idxBits);
+            tris[k] = br.readShort(idxBits);
     }
 
-    private void readBinaryPackedStripIndices(BitReader br, int idxBits, int stripCount, int[] tris, int offset, int maxIndexBits) throws IOException {
+    private void readBinaryPackedStripIndices(BitReader br, int idxBits, int stripCount, short[] tris, int offset, int maxIndexBits) throws IOException {
         for (int k = 0; k < stripCount; ++k) {
             int stripLength = br.read(maxIndexBits);
-            int v0 = br.read(idxBits), v1 = br.read(idxBits);
+            short v0 = br.readShort(idxBits), v1 = br.readShort(idxBits);
             for (int t = 0; t < stripLength; ++t) {
                 tris[offset++] = v0;
                 tris[offset++] = v0 = v1;
-                tris[offset++] = v1 = br.read(idxBits);
+                tris[offset++] = v1 = br.readShort(idxBits);
             }
         }
     }
 
-    private void readBinaryPackedFanIndices(BitReader br, int idxBits, int fanCount, int[] tris, int offset, int maxIndexBits) throws IOException {
+    private void readBinaryPackedFanIndices(BitReader br, int idxBits, int fanCount, short[] tris, int offset, int maxIndexBits) throws IOException {
         for (int k = 0; k < fanCount; ++k) {
             int fanLength = br.read(maxIndexBits);
-            int v0 = br.read(idxBits), v1 = br.read(idxBits);
+            short v0 = br.readShort(idxBits), v1 = br.readShort(idxBits);
             for (int t = 0; t < fanLength; ++t) {
                 tris[offset++] = v0;
                 tris[offset++] = v1;
-                tris[offset++] = v1 = br.read(idxBits);
+                tris[offset++] = v1 = br.readShort(idxBits);
             }
         }
     }
