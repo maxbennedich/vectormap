@@ -10,23 +10,6 @@ import android.util.Log;
  */
 public class TileRenderer {
 
-    private static final String VERTEX_SHADER =
-            "uniform mat4 uMVPMatrix;" +
-            "attribute vec4 vPosition;" +
-            "void main() {" +
-            "  gl_Position = uMVPMatrix * vPosition;" +
-//            "  gl_PointSize = 16.;" +
-            "}";
-
-    private static final String FRAGMENT_SHADER =
-            "precision lowp float;" +
-            "uniform vec4 vColor;" +
-            "void main() {" +
-            "  gl_FragColor = vColor;" +
-            "}";
-
-    private final int program;
-
     // number of coordinates per vertex in this array
     private static final int COORDS_PER_VERTEX = 2;
 
@@ -64,9 +47,9 @@ public class TileRenderer {
             ++type;
         }
 
-        program = ShaderHelper.createProgram(
-                ShaderHelper.loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER),
-                ShaderHelper.loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER));
+//        program = ShaderHelper.createProgram(
+//                ShaderHelper.loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER),
+//                ShaderHelper.loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER));
 
         Log.i("PerfLog", String.format("Loaded %d tris, %d verts", verts.length/9, verts.length/3));
     }
@@ -80,9 +63,7 @@ public class TileRenderer {
     public static int trisDrawn = 0;
 
     /** @param mvpMatrix - The Model View Project matrix in which to draw this shape. */
-    public void draw(float[] mvpMatrix, float blend) {
-        GLES20.glUseProgram(program);
-
+    public void draw(int program, float[] mvpMatrix, float blend) {
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[0]);
 
         // prepare vertex data

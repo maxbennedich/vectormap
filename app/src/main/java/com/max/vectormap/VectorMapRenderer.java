@@ -60,15 +60,22 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
     public float centerUtmX = 400000-GLOBAL_OFS_X, centerUtmY = 6170000-GLOBAL_OFS_Y, scaleFactor = 4096;
 
+    private int glProgram;
+
     public VectorMapRenderer(Context context) {
         this.context = context;
     }
 
     @Override
     public void onSurfaceCreated(GL10 unused, EGLConfig config) {
-
         // Set the background frame color
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+        String vertexShader = Common.readInputStream(context.getResources().openRawResource(R.raw.vertex_shader));
+        String fragmentShader = Common.readInputStream(context.getResources().openRawResource(R.raw.fragment_shader));
+        glProgram = ShaderHelper.createProgram(
+                ShaderHelper.loadShader(GLES20.GL_VERTEX_SHADER, vertexShader),
+                ShaderHelper.loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShader));
 
         inventoryTris();
     }
@@ -396,6 +403,8 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 //        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE);
         GLES20.glDisable(GLES20.GL_BLEND);
 
+        GLES20.glUseProgram(glProgram);
+
         int[] tileShifts = {13, 15, 17, 19};
         float[] layerShifts = {2048, 4096, 16384};
         int layer = scaleFactor > layerShifts[2] ? 0 : (scaleFactor > layerShifts[1] ? 1 : (scaleFactor > layerShifts[0] ? 2 : 3));
@@ -421,7 +430,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
             for (int tx = tx0; tx <= tx1; ++tx) {
                 Tile tile = tileCache.get(getTilePos(layer, tx, ty));
                 if (tile != null)
-                    tile.tile.draw(scratch, 1.0f);
+                    tile.tile.draw(glProgram, scratch, 1.0f);
             }
         }
 
