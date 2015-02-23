@@ -1,7 +1,6 @@
 package com.max.vectormap;
 
 import android.content.Context;
-import android.content.res.AssetManager;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
@@ -10,13 +9,6 @@ import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
 import android.util.Log;
-
-import java.io.IOException;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Provides drawing instructions for a GLSurfaceView object. This class
@@ -29,17 +21,9 @@ import java.util.regex.Pattern;
  */
 public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
-    private static final String TAG = "MyGLRenderer";
-
     private final Context context;
 
-    private TileLoader tileLoader;
-    private LinkedHashMap<Integer, Tile> tileCache = getTileCache();
-
-    private static final int GPU_CACHE_BYTES = 20 * 1024 * 1024 * 100;
-
-    /** Contains all tile indices for which we have a tile on disk. */
-    private Set<Integer> existingTiles = new HashSet<>();
+    private TileCache tileCache;
 
     private final float[] mMVPMatrix = new float[16];
     private final float[] mProjectionMatrix = new float[16];
@@ -57,7 +41,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
     public VectorMapRenderer(Context context) {
         this.context = context;
-        tileLoader = new TileLoader(context);
     }
 
     @Override
@@ -71,76 +54,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 ShaderHelper.loadShader(GLES20.GL_VERTEX_SHADER, vertexShader),
                 ShaderHelper.loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShader));
 
-        inventoryTris();
-    }
-
-    // TODO a cache that removes multiple entries if needed (based on size)
-    // TODO we should probably also assign weights to entries and e.g. remove large/remote/zoomed in entries first
-    private LinkedHashMap<Integer, Tile> getTileCache() {
-        return new LinkedHashMap<Integer, Tile>(64, 0.75f, true) {
-            private static final long serialVersionUID = 1L;
-
-            private long gpuBytes = 0;
-
-            /**
-             * Override get to load tiles not in the cache and insert them into the cache.
-             *
-             * @return Null if tile could not be loaded (typically out of bounds).
-             */
-            @Override public Tile get(Object key) {
-                Tile tile = super.get(key);
-                if (tile != null)
-                    return tile;
-
-                Integer tp = (Integer) key;
-                if ((tile = loadTile(tp)) != null) {
-                    put(tp, tile);
-                    gpuBytes += tile.getGPUBytes();
-                    Log.d("Cache", "Loading tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getGPUBytes() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024)+" KB");
-                }
-                return tile;
-            }
-
-            @Override protected boolean removeEldestEntry(Entry<Integer, Tile> eldest) {
-                boolean remove = gpuBytes > GPU_CACHE_BYTES;
-                if (remove) {
-                    Tile tile = eldest.getValue();
-                    tile.delete();
-                    gpuBytes -= tile.getGPUBytes();
-                    Log.d("Cache", "Deleting tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getGPUBytes() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024)+" KB");
-                }
-                return remove;
-            }
-        };
-    }
-
-    private Tile loadTile(Integer tp) {
-        return existingTiles.contains(tp) ? tileLoader.loadTile(tp) : null;
-    }
-
-    /** Does not load anything from disk, only inventories what's there. */
-    private void inventoryTris() {
-        Pattern p = Pattern.compile("tri_(\\d+)_(\\d+)_(\\d+)\\.tri");
-
-        AssetManager manager = context.getAssets();
-        String[] assets;
-        try {
-            assets = manager.list("tris");
-        } catch (IOException e) {
-            throw new IllegalStateException("Error loading assets", e);
-        }
-
-        for (String asset : assets) {
-            Matcher m = p.matcher(asset);
-            if (m.find()) {
-                int size = Integer.valueOf(m.group(1));
-                int layer = size == 8192 ? 0 : (size == 32768 ? 1 : (size == 131072 ? 2 : (size == 524288 ? 3 : -1)));
-                int tx = Integer.valueOf(m.group(2));
-                int ty = Integer.valueOf(m.group(3));
-                int tilePos = getTilePos(layer, tx, ty);
-                existingTiles.add(tilePos);
-            }
-        }
+        tileCache = new TileCache(context);
     }
 
     private long prevNanoTime = System.nanoTime();
@@ -212,7 +126,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
 
         Tile.trisDrawn = 0;
-        for (int tp : existingTiles) {
+        for (int tp : tileCache.existingTiles) {
             Tile tile = tileCache.get(tp);
             if (tile != null && tile.size == 0)
                 tile.draw(glProgram, 1.0f);
