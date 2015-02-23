@@ -11,12 +11,6 @@ import javax.microedition.khronos.opengles.GL10;
 
 import android.util.Log;
 
-import com.max.integercompression.Composition;
-import com.max.integercompression.FastPFOR;
-import com.max.integercompression.IntWrapper;
-import com.max.integercompression.IntegerCODEC;
-import com.max.integercompression.VariableByte;
-
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -171,7 +165,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
                 BitReader br = new BitReader(dis);
 
-//                int[] uncompressed = readPFORVertices(dis, vertexCount);
                 int[] uncompressedVertices = readBinaryPackedVertices(dis, br, vertexCount);
 
                 Map<Integer, short[]> trisByType = new LinkedHashMap<>();
@@ -185,7 +178,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                     readBinaryPackedTriIndices(br, idxBits, triCount[t], tris);
                     readBinaryPackedStripIndices(br, idxBits, stripCount[t], tris, triCount[t]*3, primitiveCountBits[t]);
                     readBinaryPackedFanIndices(br, idxBits, fanCount[t], tris, (triCount[t] + stripTriCount[t])*3, primitiveCountBits[t]);
-//                int[] tris = readPFORData(dis, triCount * 3);
 
                     trisByType.put(t, tris);
                 }
@@ -266,21 +258,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         int getBytesInGPU() {
             return gpuBytes;
         }
-    }
-
-    private int[] readPFORData(DataInputStream dis, int uncompressedSize) throws IOException {
-        // read compressed data from disk
-        int compressedLength = dis.readInt();
-        int[] compressed = new int[compressedLength];
-        for (int n = 0; n < compressedLength; ++n)
-            compressed[n] = dis.readInt();
-
-        // decompress
-        IntegerCODEC codec = new Composition(new FastPFOR(), new VariableByte());
-        int[] uncompressed = new int[uncompressedSize];
-        codec.uncompress(compressed, new IntWrapper(0), compressed.length, uncompressed, new IntWrapper(0));
-
-        return uncompressed;
     }
 
     private int[] readBinaryPackedVertices(DataInputStream dis, BitReader br, int vertexCount) throws IOException {
