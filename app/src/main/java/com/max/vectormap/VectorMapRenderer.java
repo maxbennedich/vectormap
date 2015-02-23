@@ -409,13 +409,13 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
         Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
 
-//        TileRenderer.drawn = 0;
+//        TileRenderer.trisDrawn = 0;
 //        for (int tp : existingTiles) {
 //            Tile tile = tileCache.get(tp);
 //            if (tile != null && tile.size == 0)
 //                tile.tile.draw(scratch, 1.0f);
 //        }
-//        Log.v("View", "Triangles drawn: " + TileRenderer.drawn);
+//        Log.v("View", "Triangles drawn: " + TileRenderer.trisDrawn);
 
         for (int ty = ty0; ty <= ty1; ++ty) {
             for (int tx = tx0; tx <= tx1; ++tx) {
@@ -470,36 +470,5 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         // this projection matrix is applied to object coordinates in the onDrawFrame() method
         Matrix.frustumM(mProjectionMatrix, 0, -screenRatio, screenRatio, -1f, 1f, nearPlane, 16384);
 
-    }
-
-    /**
-     * Utility method for compiling a OpenGL shader.
-     *
-     * <p><strong>Note:</strong> When developing shaders, use the checkGlError()
-     * method to debug shader coding errors.</p>
-     *
-     * @param type - Vertex or fragment shader type.
-     * @param shaderCode - String containing the shader code.
-     * @return - Returns an id for the shader.
-     */
-    public static int loadShader(int type, String shaderCode) {
-
-        // create a vertex shader type (GLES20.GL_VERTEX_SHADER)
-        // or a fragment shader type (GLES20.GL_FRAGMENT_SHADER)
-        int shader = GLES20.glCreateShader(type);
-
-        // add the source code to the shader and compile it
-        GLES20.glShaderSource(shader, shaderCode);
-        GLES20.glCompileShader(shader);
-
-        return shader;
-    }
-
-    /** Utility method for debugging OpenGL calls. If the operation is not successful,
-     * the check throws an error. */
-    public static void checkGlError() {
-        int error;
-        while ((error = GLES20.glGetError()) != GLES20.GL_NO_ERROR)
-            throw new RuntimeException("GL Error " + error);
     }
 }
