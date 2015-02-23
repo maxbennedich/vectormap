@@ -97,8 +97,8 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 Integer tp = (Integer) key;
                 if ((tile = loadTile(tp)) != null) {
                     put(tp, tile);
-                    gpuBytes += tile.getBytesInGPU();
-                    Log.d("Cache", "Loading tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getBytesInGPU() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024)+" KB");
+                    gpuBytes += tile.getGPUBytes();
+                    Log.d("Cache", "Loading tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getGPUBytes() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024)+" KB");
                 }
                 return tile;
             }
@@ -107,9 +107,9 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 boolean remove = gpuBytes > GPU_CACHE_BYTES;
                 if (remove) {
                     Tile tile = eldest.getValue();
-                    tile.tile.delete();
-                    gpuBytes -= tile.getBytesInGPU();
-                    Log.d("Cache", "Deleting tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getBytesInGPU() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024)+" KB");
+                    tile.delete();
+                    gpuBytes -= tile.getGPUBytes();
+                    Log.d("Cache", "Deleting tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getGPUBytes() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024)+" KB");
                 }
                 return remove;
             }
@@ -236,31 +236,12 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                     verts[vi++] = py + ofsy - GLOBAL_OFS_Y;
                 }
 
-                return new Tile(layer, tx, ty, new TileRenderer(verts, trisByType));
+                return new Tile(layer, tx, ty, verts, trisByType);
             } catch (IOException ioe) {
                 throw new RuntimeException("Error loading triangles", ioe);
             }
         }
         return null;
-    }
-
-    class Tile {
-        final int size;
-        final int tx, ty;
-        final TileRenderer tile;
-        final int gpuBytes;
-
-        public Tile(int size, int tx, int ty, TileRenderer tile) {
-            this.size = size;
-            this.tx = tx;
-            this.ty = ty;
-            this.tile = tile;
-            this.gpuBytes = tile.getBytesInGPU();
-        }
-
-        int getBytesInGPU() {
-            return gpuBytes;
-        }
     }
 
     private int[] readBinaryPackedVertices(DataInputStream dis, BitReader br, int vertexCount) throws IOException {
@@ -405,13 +386,13 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
         Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
 
-        TileRenderer.trisDrawn = 0;
+        Tile.trisDrawn = 0;
         for (int tp : existingTiles) {
             Tile tile = tileCache.get(tp);
             if (tile != null && tile.size == 0)
-                tile.tile.draw(glProgram, 1.0f);
+                tile.draw(glProgram, 1.0f);
         }
-        Log.v("View", "Triangles drawn: " + TileRenderer.trisDrawn);
+        Log.v("View", "Triangles drawn: " + Tile.trisDrawn);
 
 //        for (int ty = ty0; ty <= ty1; ++ty) {
 //            for (int tx = tx0; tx <= tx1; ++tx) {

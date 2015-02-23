@@ -8,10 +8,10 @@ import android.util.Log;
 /**
  * Class responsible for rendering a tile consisting of many triangles.
  */
-public class TileRenderer {
+public class Tile {
 
-    // number of coordinates per vertex in this array
-    private static final int COORDS_PER_VERTEX = 2;
+    final int size;
+    final int tx, ty;
 
     private int gpuBytes;
 
@@ -22,12 +22,18 @@ public class TileRenderer {
     final int[] indexCount;
     final float[][] color;
 
+    private static final int COORDS_PER_VERTEX = 2;
+
     private static float[] rgb(int rgb) {
         return new float[] {(rgb>>16) / 255f, (rgb>>8&0xff) / 255f, (rgb&0xff) / 255f, 0};
     }
 
     /** Sets up the drawing object data for use in an OpenGL ES context. */
-    public TileRenderer(float[] verts, Map<Integer, short[]> trisByType) {
+    public Tile(int size, int tx, int ty, float[] verts, Map<Integer, short[]> trisByType) {
+        this.size = size;
+        this.tx = tx;
+        this.ty = ty;
+
         gpuBytes = GLHelper.createVertexBuffer(verts, vbo);
 
         ibo = new int[trisByType.size()];
@@ -90,7 +96,7 @@ public class TileRenderer {
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
     }
 
-    public int getBytesInGPU() {
+    public int getGPUBytes() {
         return gpuBytes;
     }
 }
