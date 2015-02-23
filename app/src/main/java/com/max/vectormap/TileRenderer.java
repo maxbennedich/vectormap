@@ -165,11 +165,11 @@ public class TileRenderer {
 
         // get handle to shape's transformation matrix
         mMVPMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix");
-        VectorMapRenderer.checkGlError("glGetUniformLocation");
 
         // Apply the projection and view transformation
         GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0);
-        VectorMapRenderer.checkGlError("glUniformMatrix4fv");
+
+        VectorMapRenderer.checkGlError();
     }
 
     public int getBytesInGPU() {

@@ -24,6 +24,8 @@ class VectorMapSurfaceView extends GLSurfaceView {
         // Create an OpenGL ES 2.0 context.
         setEGLContextClientVersion(2);
 
+        setPreserveEGLContextOnPause(true);
+
         // Set the Renderer for drawing on the GLSurfaceView
         mRenderer = new VectorMapRenderer(context);
         setRenderer(mRenderer);

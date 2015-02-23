@@ -396,7 +396,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 //        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE);
         GLES20.glDisable(GLES20.GL_BLEND);
 
-        int[] tileShifts = {14, 16, 18, 20};
+        int[] tileShifts = {13, 15, 17, 19};
         float[] layerShifts = {2048, 4096, 16384};
         int layer = scaleFactor > layerShifts[2] ? 0 : (scaleFactor > layerShifts[1] ? 1 : (scaleFactor > layerShifts[0] ? 2 : 3));
 
@@ -409,23 +409,21 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
         Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
 
-        TileRenderer.drawn = 0;
-
-        for (int tp : existingTiles) {
-            Tile tile = tileCache.get(tp);
-            if (tile != null && tile.size == 0)
-                tile.tile.draw(scratch, 1.0f);
-        }
-
-        Log.v("View", "Triangles drawn: " + TileRenderer.drawn);
-//        for (int ty = ty0; ty <= ty1; ++ty) {
-//            for (int tx = tx0; tx <= tx1; ++tx) {
-//                Tile tile = tileCache.get(getTilePos(layer, tx, ty));
-//                if (tile != null)
-//                    for (SurfaceTypeTile stTile : tile.tiles)
-//                        stTile.tri.draw(scratch, 1.0f);
-//            }
+//        TileRenderer.drawn = 0;
+//        for (int tp : existingTiles) {
+//            Tile tile = tileCache.get(tp);
+//            if (tile != null && tile.size == 0)
+//                tile.tile.draw(scratch, 1.0f);
 //        }
+//        Log.v("View", "Triangles drawn: " + TileRenderer.drawn);
+
+        for (int ty = ty0; ty <= ty1; ++ty) {
+            for (int tx = tx0; tx <= tx1; ++tx) {
+                Tile tile = tileCache.get(getTilePos(layer, tx, ty));
+                if (tile != null)
+                    tile.tile.draw(scratch, 1.0f);
+            }
+        }
 
 
 //        float[] layerShifts = {2048,4096, 8192,16384};
@@ -484,7 +482,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
      * @param shaderCode - String containing the shader code.
      * @return - Returns an id for the shader.
      */
-    public static int loadShader(int type, String shaderCode){
+    public static int loadShader(int type, String shaderCode) {
 
         // create a vertex shader type (GLES20.GL_VERTEX_SHADER)
         // or a fragment shader type (GLES20.GL_FRAGMENT_SHADER)
@@ -497,40 +495,11 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         return shader;
     }
 
-    /**
-     * Utility method for debugging OpenGL calls. Provide the name of the call
-     * just after making it:
-     *
-     * <pre>
-     * mColorHandle = GLES20.glGetUniformLocation(mProgram, "vColor");
-     * MyGLRenderer.checkGlError("glGetUniformLocation");</pre>
-     *
-     * If the operation is not successful, the check throws an error.
-     *
-     * @param glOperation - Name of the OpenGL call to check.
-     */
-    public static void checkGlError(String glOperation) {
+    /** Utility method for debugging OpenGL calls. If the operation is not successful,
+     * the check throws an error. */
+    public static void checkGlError() {
         int error;
-        while ((error = GLES20.glGetError()) != GLES20.GL_NO_ERROR) {
-            Log.e(TAG, glOperation + ": glError " + error);
-            throw new RuntimeException(glOperation + ": glError " + error);
-        }
+        while ((error = GLES20.glGetError()) != GLES20.GL_NO_ERROR)
+            throw new RuntimeException("GL Error " + error);
     }
-
-    /**
-     * Returns the rotation angle of the triangle shape (mTriangle).
-     *
-     * @return - A float representing the rotation angle.
-     */
-    public float getAngle() {
-        return mAngle;
-    }
-
-    /**
-     * Sets the rotation angle of the triangle shape (mTriangle).
-     */
-    public void setAngle(float angle) {
-        mAngle = angle;
-    }
-
 }
