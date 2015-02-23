@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.nio.ShortBuffer;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -107,16 +108,19 @@ public class TileRenderer {
 //          color[0]/=2; color[1]/=2; color[2]/=2; // for testing overdraw
 
             // initialize vertex index byte buffer
-            int indexSize = tris.getValue().length * Constants.BYTES_IN_INT;
-            IntBuffer indexBuffer = ByteBuffer.allocateDirect(indexSize).order(ByteOrder.nativeOrder()).asIntBuffer();
-            indexBuffer.put(tris.getValue()).position(0);
+            short[] newIdx = new short[tris.getValue().length];
+            for (int k = 0; k < tris.getValue().length; ++k)
+                newIdx[k] = (short)tris.getValue()[k];
+            int indexSize = tris.getValue().length * Constants.BYTES_IN_SHORT;
+            ShortBuffer indexBuffer = ByteBuffer.allocateDirect(indexSize).order(ByteOrder.nativeOrder()).asShortBuffer();
+            indexBuffer.put(newIdx).position(0);
 
             gpuBytes += indexSize;
 
             GLES20.glGenBuffers(1, ibo, type);
             if (ibo[type] > 0) {
                 GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[type]);
-                GLES20.glBufferData(GLES20.GL_ELEMENT_ARRAY_BUFFER, indexBuffer.capacity() * Constants.BYTES_IN_INT, indexBuffer, GLES20.GL_STATIC_DRAW);
+                GLES20.glBufferData(GLES20.GL_ELEMENT_ARRAY_BUFFER, indexBuffer.capacity() * Constants.BYTES_IN_SHORT, indexBuffer, GLES20.GL_STATIC_DRAW);
                 GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
             } else {
                 throw new RuntimeException("Buffer error: " + ibo[type]);
@@ -155,7 +159,7 @@ public class TileRenderer {
             GLES20.glUniform4fv(mColorHandle, 1, color[t], 0);
 
             GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[t]);
-            GLES20.glDrawElements(GLES20.GL_TRIANGLES, indexCount[t], GLES20.GL_UNSIGNED_INT, 0);
+            GLES20.glDrawElements(GLES20.GL_TRIANGLES, indexCount[t], GLES20.GL_UNSIGNED_SHORT, 0);
             drawn += indexCount[t]/3;
         }
 

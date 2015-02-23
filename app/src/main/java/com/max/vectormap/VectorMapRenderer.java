@@ -136,7 +136,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         if (existingTiles.contains(tp)) {
             int layer = getLayer(tp);
             int tx = getTX(tp), ty = getTY(tp);
-            int size = layer == 0 ? 16384 : (layer == 1 ? 65536 : (layer == 2 ? 262144 : (layer == 3 ? 1048576 : -1)));
+            int size = layer == 0 ? 8192 : (layer == 1 ? 32768 : (layer == 2 ? 131072 : (layer == 3 ? 524288 : -1)));
 
             String tileName = "tris/tri_" + size + "_" + tx + "_" + ty + ".tri";
 
@@ -198,6 +198,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 int[] newOrder = new int[vertexCount];
                 int newVertexCount = 0;
                 Arrays.fill(bucketLen, 0);
+                Log.d("VertexCount", ""+vertexCount);
 
                 for (Map.Entry<Integer, int[]> tris : trisByType.entrySet()) {
                     for (int n = 0; n < tris.getValue().length; ++n) {
@@ -225,7 +226,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 // un-quantize vertices
                 float[] verts = new float[vertexCount * 2]; // 2 coords per vertex
                 int ofsx = tx*size, ofsy = ty*size;
-                int QUANT_BITS = 14;
+                int QUANT_BITS = 13;
                 int vi = 0;
                 for (int coord : newOrder) {
                     // TODO could be solved by shifting and adding to speed things up
@@ -359,7 +360,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
             Matcher m = p.matcher(asset);
             if (m.find()) {
                 int size = Integer.valueOf(m.group(1));
-                int layer = size == 16384 ? 0 : (size == 65536 ? 1 : (size == 262144 ? 2 : (size == 1048576 ? 3 : -1)));
+                int layer = size == 8192 ? 0 : (size == 32768 ? 1 : (size == 131072 ? 2 : (size == 524288 ? 3 : -1)));
                 int tx = Integer.valueOf(m.group(2));
                 int ty = Integer.valueOf(m.group(3));
                 int tilePos = getTilePos(layer, tx, ty);

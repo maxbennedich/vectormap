@@ -2,6 +2,7 @@ package com.max.vectormap;
 
 public class Constants {
     public static final int BYTES_IN_FLOAT = Float.SIZE/Byte.SIZE;
+    public static final int BYTES_IN_SHORT = Short.SIZE/Byte.SIZE;
     public static final int BYTES_IN_INT = Integer.SIZE/Byte.SIZE;
 
     public static final int NR_SURFACE_TYPES = 10;
