@@ -35,4 +35,10 @@ public class Common {
         activityManager.getMemoryInfo(mInfo);
         Log.v("Memory", "MB memory available: " + mInfo.availMem / 1024 / 1024);
     }
+
+    /** 0 -> 1, 1 -> 1, 2 -> 2, 3 -> 2, 4 -> 3, 5 -> 3, etc. Note: returns 1 for k=0 since 1 bit is needed to encode 0. */
+    public static final int log2(int k) {
+        return k == 0 ? 1 : (32 - Integer.numberOfLeadingZeros(k));
+    }
+
 }
