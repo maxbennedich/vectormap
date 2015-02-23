@@ -4,8 +4,6 @@ import android.opengl.GLES20;
 import android.util.Log;
 
 public class ShaderHelper {
-    private static final String TAG = "ShaderHelper";
-
     /**
      * Helper function to load a shader.
      * @return An OpenGL handle to the shader.
@@ -20,7 +18,7 @@ public class ShaderHelper {
         GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, compileStatus, 0);
 
         if (compileStatus[0] == 0) {
-            Log.e(TAG, "Error compiling shader: " + GLES20.glGetShaderInfoLog(shader));
+            Log.e("Shader", "Error compiling shader: " + GLES20.glGetShaderInfoLog(shader));
             GLES20.glDeleteShader(shader);
             throw new RuntimeException("Error compiling shader");
         }
@@ -43,7 +41,7 @@ public class ShaderHelper {
         GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linkStatus, 0);
 
         if (linkStatus[0] == 0) {
-            Log.e(TAG, "Error linking program: " + GLES20.glGetProgramInfoLog(program));
+            Log.e("Shader", "Error linking program: " + GLES20.glGetProgramInfoLog(program));
             GLES20.glDeleteProgram(program);
             throw new RuntimeException("Error linking program");
         }

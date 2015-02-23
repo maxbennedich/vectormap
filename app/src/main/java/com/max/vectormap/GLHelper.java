@@ -9,8 +9,10 @@ import java.nio.ShortBuffer;
 
 public class GLHelper {
 
-    /** Utility method for debugging OpenGL calls. If the operation is not successful,
-     * the check throws an error. */
+    /**
+     * Utility method for debugging OpenGL calls.
+     * @throws java.lang.RuntimeException If there's an error.
+     */
     public static void checkGlError() {
         int error = GLES20.glGetError();
         if (error != GLES20.GL_NO_ERROR)
