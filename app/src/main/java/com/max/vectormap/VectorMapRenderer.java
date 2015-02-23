@@ -44,13 +44,9 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
     /** Contains all tile indices for which we have a tile on disk. */
     private Set<Integer> existingTiles = new HashSet<>();
 
-    // mMVPMatrix is an abbreviation for "Model View Projection Matrix"
     private final float[] mMVPMatrix = new float[16];
     private final float[] mProjectionMatrix = new float[16];
     private final float[] mViewMatrix = new float[16];
-    private final float[] mRotationMatrix = new float[16];
-
-    private float mAngle;
 
     private float screenRatio;
     private float nearPlane = 0.01f;
@@ -378,8 +374,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
     public void onDrawFrame(GL10 unused) {
         logFPS();
 
-        float[] scratch = new float[16];
-
         // Draw background color
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
@@ -388,12 +382,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
         // Calculate the projection and view transformation
         Matrix.multiplyMM(mMVPMatrix, 0, mProjectionMatrix, 0, mViewMatrix, 0);
-
-        // Rotate scene
-        // long time = SystemClock.uptimeMillis() % 4000L;
-        // float angle = 0.090f * ((int) time);
-        Matrix.setRotateM(mRotationMatrix, 0, mAngle, 0, 0, 1.0f);
-        Matrix.multiplyMM(scratch, 0, mMVPMatrix, 0, mRotationMatrix, 0);
 
 //        GLES20.glDisable(GLES20.GL_CULL_FACE);
 //        GLES20.glDisable(GLES20.GL_DEPTH_TEST);
@@ -404,6 +392,9 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         GLES20.glDisable(GLES20.GL_BLEND);
 
         GLES20.glUseProgram(glProgram);
+
+        int MVPMatrixHandle = GLES20.glGetUniformLocation(glProgram, "uMVPMatrix");
+        GLES20.glUniformMatrix4fv(MVPMatrixHandle, 1, false, mMVPMatrix, 0);
 
         int[] tileShifts = {13, 15, 17, 19};
         float[] layerShifts = {2048, 4096, 16384};
@@ -418,21 +409,21 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
         Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
 
-//        TileRenderer.trisDrawn = 0;
-//        for (int tp : existingTiles) {
-//            Tile tile = tileCache.get(tp);
-//            if (tile != null && tile.size == 0)
-//                tile.tile.draw(scratch, 1.0f);
-//        }
-//        Log.v("View", "Triangles drawn: " + TileRenderer.trisDrawn);
-
-        for (int ty = ty0; ty <= ty1; ++ty) {
-            for (int tx = tx0; tx <= tx1; ++tx) {
-                Tile tile = tileCache.get(getTilePos(layer, tx, ty));
-                if (tile != null)
-                    tile.tile.draw(glProgram, scratch, 1.0f);
-            }
+        TileRenderer.trisDrawn = 0;
+        for (int tp : existingTiles) {
+            Tile tile = tileCache.get(tp);
+            if (tile != null && tile.size == 0)
+                tile.tile.draw(glProgram, 1.0f);
         }
+        Log.v("View", "Triangles drawn: " + TileRenderer.trisDrawn);
+
+//        for (int ty = ty0; ty <= ty1; ++ty) {
+//            for (int tx = tx0; tx <= tx1; ++tx) {
+//                Tile tile = tileCache.get(getTilePos(layer, tx, ty));
+//                if (tile != null)
+//                    tile.tile.draw(glProgram, 1.0f);
+//            }
+//        }
 
 
 //        float[] layerShifts = {2048,4096, 8192,16384};

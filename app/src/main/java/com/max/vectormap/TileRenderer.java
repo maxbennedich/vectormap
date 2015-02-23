@@ -47,10 +47,6 @@ public class TileRenderer {
             ++type;
         }
 
-//        program = ShaderHelper.createProgram(
-//                ShaderHelper.loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER),
-//                ShaderHelper.loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER));
-
         Log.i("PerfLog", String.format("Loaded %d tris, %d verts", verts.length/9, verts.length/3));
     }
 
@@ -62,8 +58,7 @@ public class TileRenderer {
 
     public static int trisDrawn = 0;
 
-    /** @param mvpMatrix - The Model View Project matrix in which to draw this shape. */
-    public void draw(int program, float[] mvpMatrix, float blend) {
+    public void draw(int program, float blend) {
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[0]);
 
         // prepare vertex data
@@ -73,9 +68,6 @@ public class TileRenderer {
 
 //        int mBlendHandle = GLES20.glGetUniformLocation(program, "blend");
 //        GLES20.glUniform1f(mBlendHandle, blend);
-
-        int MVPMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix");
-        GLES20.glUniformMatrix4fv(MVPMatrixHandle, 1, false, mvpMatrix, 0);
 
         GLHelper.checkGlError();
 
