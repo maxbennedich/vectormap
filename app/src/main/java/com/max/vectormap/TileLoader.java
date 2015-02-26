@@ -74,6 +74,7 @@ public class TileLoader {
         }
     }
 
+    /** Never returns null. */
     public Tile loadTile(int tp) {
         int layer = VectorMapRenderer.getLayer(tp);
         int tx = VectorMapRenderer.getTX(tp), ty = VectorMapRenderer.getTY(tp);

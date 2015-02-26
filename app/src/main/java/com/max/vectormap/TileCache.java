@@ -5,18 +5,18 @@ import android.content.res.AssetManager;
 import android.util.Log;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * TODO a cache that removes multiple entries if needed (based on size)
- * TODO we should probably also assign weights to entries and e.g. remove large/remote/zoomed in entries first
- */
-public class TileCache extends LinkedHashMap<Integer, Tile> {
-    private static final int GPU_CACHE_BYTES = 20 * 1024 * 1024 * 100;
+public class TileCache {
+
+    Map<Integer, Tile> cache = new ConcurrentHashMap<>();
 
     /** Contains all tile indices for which we have a tile on disk. */
     Set<Integer> existingTiles = new HashSet<>();
@@ -24,19 +24,11 @@ public class TileCache extends LinkedHashMap<Integer, Tile> {
     private final Context context;
     private final TileLoader tileLoader;
 
-    private long gpuBytes = 0;
-
     /** Creates a new tile cache and inventories all tiles available on disk. */
     public TileCache(Context context) {
-        super(64, 0.75f, true);
-
         this.context = context;
         tileLoader = new TileLoader(context);
         inventoryTris();
-    }
-
-    private Tile loadTile(Integer tp) {
-        return existingTiles.contains(tp) ? tileLoader.loadTile(tp) : null;
     }
 
     /** Does not load anything from disk, only inventories what's there. */
@@ -65,31 +57,33 @@ public class TileCache extends LinkedHashMap<Integer, Tile> {
     }
 
     /**
-     * Override get to load tiles not in the cache and insert them into the cache.
-     * @return Null if tile could not be loaded (typically out of bounds).
+     * @return Existing tile if already in cache, otherwise a freshly loaded tile.
+     * Returns null if tile is out of bounds.
      */
-    @Override public Tile get(Object key) {
-        Tile tile = super.get(key);
-        if (tile != null)
-            return tile;
+    public Tile get(int tilePos) {
+        if (!existingTiles.contains(tilePos))
+            return null;
 
-        Integer tp = (Integer) key;
-        if ((tile = loadTile(tp)) != null) {
-            put(tp, tile);
-            gpuBytes += tile.getGPUBytes();
-            Log.d("Cache", "Loading tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getGPUBytes() + " bytes, new cache size: " + ((gpuBytes + 512 * 1024) / 1024) + " KB");
+        Tile tile = cache.get(tilePos);
+        if (tile == null) {
+            synchronized (this) {
+                if ((tile = cache.get(tilePos)) == null) { // test again in case another thread just populated it
+                    cache.put(tilePos, tile = tileLoader.loadTile(tilePos));
+                    Log.d("TileCache", "Loaded tile " + VectorMapRenderer.getTilePos(tile.size, tile.tx, tile.ty));
+                }
+            }
         }
         return tile;
     }
 
-    @Override protected boolean removeEldestEntry(Entry<Integer, Tile> eldest) {
-        boolean remove = gpuBytes > GPU_CACHE_BYTES;
-        if (remove) {
-            Tile tile = eldest.getValue();
-            tile.delete();
-            gpuBytes -= tile.getGPUBytes();
-            Log.d("Cache", "Deleting tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getGPUBytes() + " bytes, new cache size: "+((gpuBytes +512*1024)/1024)+" KB");
-        }
-        return remove;
-    }
+//    @Override protected boolean removeEldestEntry(Entry<Integer, Tile> eldest) {
+//        boolean remove = gpuBytes > GPU_CACHE_BYTES;
+//        if (remove) {
+//            Tile tile = eldest.getValue();
+//            tile.delete();
+//            gpuBytes -= tile.getGPUBytes();
+//            Log.d("TileCache", "Deleting tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getGPUBytes() + " bytes, new cache size: "+((gpuBytes + 512)/1024)+" KB");
+//        }
+//        return remove;
+//    }
 }

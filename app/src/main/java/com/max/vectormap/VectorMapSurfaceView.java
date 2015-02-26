@@ -27,7 +27,7 @@ class VectorMapSurfaceView extends GLSurfaceView {
         setPreserveEGLContextOnPause(true);
 
         // Set the Renderer for drawing on the GLSurfaceView
-        mRenderer = new VectorMapRenderer(context);
+        mRenderer = new VectorMapRenderer(context, this);
         setRenderer(mRenderer);
 
         // Render the view only when there is a change in the drawing data
@@ -74,7 +74,7 @@ class VectorMapSurfaceView extends GLSurfaceView {
 
 //                    mapCenterUpdated();
 
-                    Log.v("Touch", "dx="+dx+", dy="+dy+", x="+(mRenderer.centerUtmX+ VectorMapRenderer.GLOBAL_OFS_X)+", y="+(mRenderer.centerUtmY+ VectorMapRenderer.GLOBAL_OFS_Y)+", scale="+mRenderer.scaleFactor);
+//                    Log.v("Touch", "dx="+dx+", dy="+dy+", x="+(mRenderer.centerUtmX+ VectorMapRenderer.GLOBAL_OFS_X)+", y="+(mRenderer.centerUtmY+ VectorMapRenderer.GLOBAL_OFS_Y)+", scale="+mRenderer.scaleFactor);
 
                     requestRender();
                 }
