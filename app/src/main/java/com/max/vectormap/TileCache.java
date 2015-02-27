@@ -60,7 +60,7 @@ public class TileCache {
      * @return Existing tile if already in cache, otherwise a freshly loaded tile.
      * Returns null if tile is out of bounds.
      */
-    public Tile get(int tilePos) {
+    public Tile get(int tilePos, boolean logCacheMiss) {
         if (!existingTiles.contains(tilePos))
             return null;
 
@@ -69,21 +69,10 @@ public class TileCache {
             synchronized (this) {
                 if ((tile = cache.get(tilePos)) == null) { // test again in case another thread just populated it
                     cache.put(tilePos, tile = tileLoader.loadTile(tilePos));
-                    Log.d("TileCache", "Loaded tile " + VectorMapRenderer.getTilePos(tile.size, tile.tx, tile.ty));
+                    Log.d("TileCache", (logCacheMiss ? "CACHE MISS: " : "") + "Loaded tile " + VectorMapRenderer.getTilePos(tile.size, tile.tx, tile.ty));
                 }
             }
         }
         return tile;
     }
-
-//    @Override protected boolean removeEldestEntry(Entry<Integer, Tile> eldest) {
-//        boolean remove = gpuBytes > GPU_CACHE_BYTES;
-//        if (remove) {
-//            Tile tile = eldest.getValue();
-//            tile.delete();
-//            gpuBytes -= tile.getGPUBytes();
-//            Log.d("TileCache", "Deleting tile " + tile.size + "," + tile.tx + "," + tile.ty + ": " + tile.getGPUBytes() + " bytes, new cache size: "+((gpuBytes + 512)/1024)+" KB");
-//        }
-//        return remove;
-//    }
 }

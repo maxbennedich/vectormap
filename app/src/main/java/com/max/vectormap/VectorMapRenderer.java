@@ -45,7 +45,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
     private final VectorMapSurfaceView surfaceView;
 
     private TileCache tileCache;
-//    private TileDiskLoader tileDiskLoader;
 
     private final float[] mMVPMatrix = new float[16];
     private final float[] mProjectionMatrix = new float[16];
@@ -68,19 +67,24 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
     @Override
     public void onSurfaceCreated(GL10 unused, EGLConfig config) {
-        // Set the background frame color
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+        GLES20.glDisable(GLES20.GL_CULL_FACE);
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST);
+
+        // To test overdraw: use glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE) and half all RGB values!
+//        GLES20.glEnable(GLES20.GL_BLEND);
+//        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE);
+        GLES20.glDisable(GLES20.GL_BLEND);
 
         String vertexShader = Common.readInputStream(context.getResources().openRawResource(R.raw.vertex_shader));
         String fragmentShader = Common.readInputStream(context.getResources().openRawResource(R.raw.fragment_shader));
         glProgram = ShaderHelper.createProgram(
                 ShaderHelper.loadShader(GLES20.GL_VERTEX_SHADER, vertexShader),
                 ShaderHelper.loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShader));
+        GLES20.glUseProgram(glProgram);
 
         tileCache = new TileCache(context);
-//        tileDiskLoader = new TileDiskLoader(tileCache);
-//
-//        new Thread(tileDiskLoader).start();
     }
 
     private long prevNanoTime = System.nanoTime();
@@ -123,16 +127,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         // Draw background color
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
-        GLES20.glDisable(GLES20.GL_CULL_FACE);
-        GLES20.glDisable(GLES20.GL_DEPTH_TEST);
-
-        // To test overdraw: use glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE) and half all RGB values!
-//        GLES20.glEnable(GLES20.GL_BLEND);
-//        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE);
-        GLES20.glDisable(GLES20.GL_BLEND);
-
-        GLES20.glUseProgram(glProgram);
-
         Matrix.setLookAtM(mViewMatrix, 0, centerUtmX, centerUtmY, getCameraDistance(), centerUtmX, centerUtmY, 0f, 0f, 1.0f, 0.0f);
         Matrix.multiplyMM(mMVPMatrix, 0, mProjectionMatrix, 0, mViewMatrix, 0);
         int MVPMatrixHandle = GLES20.glGetUniformLocation(glProgram, "uMVPMatrix");
@@ -150,7 +144,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         int ty1 = GLOBAL_OFS_Y + screenEdges[3] >> tileShifts[layer];
 
 //        Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
-        Log.v("TileCache", String.format("%.0f kb in GPU, %.0f kb in memory, %.0f kb ever allocated", Tile.gpuBytes/1024.0, Tile.bufferBytes/1024.0, Tile.bufferBytesEverAllocated/1024.0));
+        Log.v("TileCache", String.format("%.0f kb in GPU, %.0f kb in memory, %.0f kb ever allocated", Tile.gpuBytes / 1024.0, Tile.bufferBytes / 1024.0, Tile.bufferBytesEverAllocated / 1024.0));
 
         updateTilesToLoad();
 
@@ -162,23 +156,51 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 //        }
 //        Log.v("View", "Triangles drawn: " + Tile.trisDrawn);
 
-        for (int ty = ty0; ty <= ty1; ++ty)
-            for (int tx = tx0; tx <= tx1; ++tx) {
-                int tp = getTilePos(layer, tx, ty);
-                if (tileCache.existingTiles.contains(tp) && !tileCache.cache.containsKey(tp)) {
-                    Log.d("TileCache", "ERROR: tile not loaded:" + layer + "," + tx + "," + ty);
+        int tx0p1 = tx0 >> 2, ty0p1 = ty0 >> 2, tx1p1 = tx1 >> 2, ty1p1 = ty1 >> 2;
+        for (int typ1 = ty0p1; typ1 <= ty1p1; ++typ1) {
+            for (int txp1 = tx0p1; txp1 <= tx1p1; ++txp1) {
+                boolean useOuterTile = false;
+                int zoomedOutTilePos = getTilePos(layer + 1, txp1, typ1);
+
+                if (layer+1 < tileShifts.length) {
+                    // If the zoomed out tile is loaded, use it if at least 1 zoomed in tile is
+                    // not loaded. Otherwise, use it if at least 2 zoomed in tiles are not loaded.
+                    // (Since we have to load the zoomed out tile anyway.)
+                    int minTilesNotLoaded = tileCache.cache.containsKey(zoomedOutTilePos) ? 1 : 2;
+                    int tilesNotLoaded = 0;
+
+                    // loop over all (max 16) tiles in the outer tile and see if they're loaded
+                    innerTilesLoop:
+                    for (int ty = Math.max(ty0, typ1 << 2); ty <= Math.min(ty1, (typ1 << 2) + 3); ++ty) {
+                        for (int tx = Math.max(tx0, txp1 << 2); tx <= Math.min(tx1, (txp1 << 2) + 3); ++tx) {
+                            int tp = getTilePos(layer, tx, ty);
+                            if (tileCache.existingTiles.contains(tp) && !tileCache.cache.containsKey(tp)) {
+                                if (++tilesNotLoaded == minTilesNotLoaded) {
+                                    useOuterTile = true;
+                                    break innerTilesLoop;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // draw tiles
+                if (useOuterTile) {
+                    Tile tile = tileCache.get(zoomedOutTilePos, true);
+                    if (tile != null)
+                        tile.draw(glProgram, 1.0f);
+                } else {
+                    for (int ty = Math.max(ty0, typ1 << 2); ty <= Math.min(ty1, (typ1 << 2) + 3); ++ty) {
+                        for (int tx = Math.max(tx0, txp1 << 2); tx <= Math.min(tx1, (txp1 << 2) + 3); ++tx) {
+                            int tp = getTilePos(layer, tx, ty);
+                            Tile tile = tileCache.get(tp, true);
+                            if (tile != null)
+                                tile.draw(glProgram, 1.0f);
+                        }
+                    }
                 }
             }
-
-        for (int ty = ty0; ty <= ty1; ++ty) {
-            for (int tx = tx0; tx <= tx1; ++tx) {
-                int tp = getTilePos(layer, tx, ty);
-                Tile tile = tileCache.get(tp);
-                if (tile != null)
-                    tile.draw(glProgram, 1.0f);
-            }
         }
-
 
 //        float[] layerShifts = {2048,4096, 8192,16384};
 //
@@ -209,9 +231,10 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         final int R = rnd.nextInt();
 //        Log.d("TileCache", R+" tiles to load: "+tilesToLoad);
 
-        Map<Integer, Tile> loadedSnapshot = new HashMap<>(tileCache.cache);
-        loadedSnapshot.keySet().removeAll(tilesToLoad);
-        for (Tile tile : loadedSnapshot.values()) {
+        Map<Integer, Tile> tilesToDelete = new HashMap<>(tileCache.cache);
+        tilesToDelete.keySet().removeAll(tilesToLoad);
+        for (Tile tile : tilesToDelete.values()) {
+            if (tile.size == 3) continue; // never delete most zoomed out layer
 //            Log.d("TileCache", R+" deleting tile: "+getTilePos(tile.size, tile.tx, tile.ty));
             tile.delete();
             int tp = getTilePos(tile.size, tile.tx, tile.ty);
@@ -223,7 +246,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 tileDiskLoaderExecutor.execute(new Runnable() {
                     @Override public void run() {
 //                        Log.d("TileCache", R+" requesting from cache: "+tp);
-                        tileCache.get(tp);
+                        tileCache.get(tp, false);
                     }
                 });
             }
@@ -233,63 +256,10 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 //        Log.d("TileCache", "Tiles to load: " + sb);
     }
 
-//    static class TileDiskLoader implements Runnable {
-//        BlockingQueue<Integer> tilesToLoad = new LinkedBlockingDeque<>();
-//
-//        private static final Integer DELETE_TILES = new Integer(-1);
-//
-//        Map<Integer, Tile> loadedTiles = new HashMap<>();
-//
-//        private final TileCache tileCache;
-//
-//        TileDiskLoader(TileCache tileCache) {
-//            this.tileCache = tileCache;
-//        }
-//
-//        @Override public void run() {
-//            try {
-//                while (true) {
-//                    final Integer tp = tilesToLoad.take();
-//                    if (tp == DELETE_TILES) {
-//                        for (Tile tile : tilesToDelete)
-//                            tile.delete();
-//                    } else if (!loadedTiles.containsKey(tp)) {
-//                        Log.d("TileCache", "Loader thread requests tile "+getLayer(tp)+","+getTX(tp)+","+getTY(tp));
-//                        synchronized (tileCache) {
-//                            loadedTiles.put(tp, tileCache.get(tp));
-//                        }
-//                    }
-//                }
-//            } catch (InterruptedException ex) {
-//                throw new RuntimeException("Unexpected interruption", ex);
-//            }
-//        }
-//
-//        Set<Tile> tilesToDelete;
-//
-//        public void updateTiles(List<Integer> updatedTiles) {
-//            tilesToLoad.clear();
-//
-//            Set<Integer> toLoadSet = new HashSet<>(updatedTiles);
-//            tilesToDelete = new HashSet<>();
-//            for (Map.Entry<Integer, Tile> entry : loadedTiles.entrySet())
-//                if (toLoadSet.contains(entry.getKey()))
-//                    tilesToDelete.add(entry.getValue());
-//
-//            tilesToLoad.add(DELETE_TILES);
-//
-//            StringBuilder sb = new StringBuilder();
-//            for (int tp : updatedTiles) {
-//                if (tileCache.existingTiles.contains(tp)) {
-//                    sb.append("("+getLayer(tp)+","+getTX(tp)+","+getTY(tp)+") ");
-//                    tilesToLoad.add(tp);
-//                }
-//            }
-//
-//            Log.d("TileCache", "Tiles to load: " + sb);
-//        }
-//    };
-
+    /**
+     * Based on camera position and potentially other factors, figure out which tiles are either
+     * needed right away or could be needed within short (e.g. if user pans or zooms).
+     */
     void updateTilesToLoad() {
         List<Integer> tilesToLoad = new ArrayList<>();
 
@@ -343,7 +313,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         }
 
         updateTiles(tilesToLoad);
-//        tileDiskLoader.updateTiles(tilesToLoad);
     }
 
 //    void drawLayer(float[] mvpMatrix, int layer) { drawLayer(mvpMatrix, layer, 1.0f); }
