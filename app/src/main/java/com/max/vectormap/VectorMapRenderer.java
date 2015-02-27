@@ -126,7 +126,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         int ty1 = GLOBAL_OFS_Y + screenEdges[3] >> TILE_SHIFTS[layer];
 
 //        Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
-        Log.v("TileCache", String.format("%.0f kb in GPU, %.0f kb in memory, %.0f kb ever allocated", Tile.gpuBytes / 1024.0, Tile.bufferBytes / 1024.0, Tile.bufferBytesEverAllocated / 1024.0));
+        Log.v("TileCache", String.format("GPU: %.0f kb, TileCache: %.0f kb, NIO ever: %.0f kb", Tile.gpuBytes / 1024.0, Tile.bufferBytes / 1024.0, Tile.bufferBytesEverAllocated / 1024.0));
 
         tileCache.refreshForPosition(screenEdges, scaleFactor);
 
@@ -176,7 +176,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                     if (tile != null)
                         tile.draw(glProgram, 1.0f);
                 } else {
-                    // always draw zoomed in tiles like normal (even when blending)
+                    // always draw zoomed in tiles first and without blending
                     for (int ty = Math.max(ty0, typ1 << 2); ty <= Math.min(ty1, (typ1 << 2) + 3); ++ty) {
                         for (int tx = Math.max(tx0, txp1 << 2); tx <= Math.min(tx1, (txp1 << 2) + 3); ++tx) {
                             int tp = getTilePos(layer, tx, ty);

@@ -8,6 +8,7 @@ import java.util.Map;
 
 import android.opengl.GLES20;
 import android.util.Log;
+import android.util.Pair;
 
 /**
  * Class responsible for rendering a tile consisting of many triangles.
@@ -49,15 +50,15 @@ public class Tile {
      * Puts data in appropriate buffers for future loading to GL. This method is GL agnostic and
      * does therefore not need to be called in the GL thread.
      */
-    public Tile(int size, int tx, int ty, float[] verts, Map<Integer, short[]> trisByType) {
+    public Tile(int size, int tx, int ty, float[] verts, int vertexCount, Map<Integer, Pair<short[], Integer>> trisByType) {
         this.size = size;
         this.tx = tx;
         this.ty = ty;
 
 //        tileGpuBytes = GLHelper.createVertexBuffer(verts, vbo);
-        int vertexSize = verts.length * Constants.BYTES_IN_FLOAT;
+        int vertexSize = vertexCount * 2 * Constants.BYTES_IN_FLOAT;
         tmpVertexBuffer = ByteBuffer.allocateDirect(vertexSize).order(ByteOrder.nativeOrder()).asFloatBuffer();
-        tmpVertexBuffer.put(verts).position(0);
+        tmpVertexBuffer.put(verts, 0, vertexCount * 2).position(0);
         synchronized (LOCK) {
             bufferBytes += vertexSize;
             bufferBytesEverAllocated += vertexSize;
@@ -70,16 +71,16 @@ public class Tile {
 
         // create an index array for each surface type (color)
         int type = 0;
-        for (Map.Entry<Integer, short[]> tris : trisByType.entrySet()) {
-            indexCount[type] = tris.getValue().length;
+        for (Map.Entry<Integer, Pair<short[], Integer>> tris : trisByType.entrySet()) {
+            indexCount[type] = tris.getValue().second;
 
             color[type] = rgb(Constants.COLORS_NEW[tris.getKey()]);
 //          color[0]/=2; color[1]/=2; color[2]/=2; // for testing overdraw
 
 //            tileGpuBytes += GLHelper.createVertexIndexBuffer(tris.getValue(), ibo, type);
-            int indexSize = tris.getValue().length * Constants.BYTES_IN_SHORT;
+            int indexSize = indexCount[type] * Constants.BYTES_IN_SHORT;
             tmpIndexBuffers[type] = ByteBuffer.allocateDirect(indexSize).order(ByteOrder.nativeOrder()).asShortBuffer();
-            tmpIndexBuffers[type].put(tris.getValue()).position(0);
+            tmpIndexBuffers[type].put(tris.getValue().first, 0, indexCount[type]).position(0);
             synchronized (LOCK) {
                 bufferBytes += indexSize;
                 bufferBytesEverAllocated += indexSize;
@@ -88,7 +89,7 @@ public class Tile {
             ++type;
         }
 
-        Log.i("PerfLog", String.format("Loaded %d tris, %d verts", verts.length/9, verts.length/3));
+        Log.i("PerfLog", String.format("Loaded %d tris, %d verts", vertexCount / 6, vertexCount / 2));
     }
 
     FloatBuffer tmpVertexBuffer;
