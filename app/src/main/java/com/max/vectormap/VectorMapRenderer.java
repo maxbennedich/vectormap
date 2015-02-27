@@ -101,6 +101,9 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
     private int[] screenEdges = new int[4];
 
+    public static final int[] TILE_SHIFTS = {13, 15, 17, 19};
+    public static final float[] LAYER_SHIFTS = {2048, 4096, 16384};
+
     @Override
     public void onDrawFrame(GL10 unused) {
         logFPS();
@@ -113,16 +116,14 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
         int MVPMatrixHandle = GLES20.glGetUniformLocation(glProgram, "uMVPMatrix");
         GLES20.glUniformMatrix4fv(MVPMatrixHandle, 1, false, mMVPMatrix, 0);
 
-        int[] tileShifts = {13, 15, 17, 19};
-        float[] layerShifts = {2048, 4096, 16384};
-        int layer = scaleFactor > layerShifts[2] ? 0 : (scaleFactor > layerShifts[1] ? 1 : (scaleFactor > layerShifts[0] ? 2 : 3));
+        int layer = scaleFactor > LAYER_SHIFTS[2] ? 0 : (scaleFactor > LAYER_SHIFTS[1] ? 1 : (scaleFactor > LAYER_SHIFTS[0] ? 2 : 3));
 
         getScreenEdges(screenEdges);
 
-        int tx0 = GLOBAL_OFS_X + screenEdges[0] >> tileShifts[layer];
-        int ty0 = GLOBAL_OFS_Y + screenEdges[1] >> tileShifts[layer];
-        int tx1 = GLOBAL_OFS_X + screenEdges[2] >> tileShifts[layer];
-        int ty1 = GLOBAL_OFS_Y + screenEdges[3] >> tileShifts[layer];
+        int tx0 = GLOBAL_OFS_X + screenEdges[0] >> TILE_SHIFTS[layer];
+        int ty0 = GLOBAL_OFS_Y + screenEdges[1] >> TILE_SHIFTS[layer];
+        int tx1 = GLOBAL_OFS_X + screenEdges[2] >> TILE_SHIFTS[layer];
+        int ty1 = GLOBAL_OFS_Y + screenEdges[3] >> TILE_SHIFTS[layer];
 
 //        Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
         Log.v("TileCache", String.format("%.0f kb in GPU, %.0f kb in memory, %.0f kb ever allocated", Tile.gpuBytes / 1024.0, Tile.bufferBytes / 1024.0, Tile.bufferBytesEverAllocated / 1024.0));
@@ -143,7 +144,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 boolean useOuterTile = false;
                 int zoomedOutTilePos = getTilePos(layer + 1, txp1, typ1);
 
-                if (layer+1 < tileShifts.length) {
+                if (layer+1 < TILE_SHIFTS.length) {
                     // If the zoomed out tile is loaded, use it if at least 1 zoomed in tile is
                     // not loaded. Otherwise, use it if at least 2 zoomed in tiles are not loaded.
                     // (Since we have to load the zoomed out tile anyway.)

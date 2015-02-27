@@ -98,26 +98,24 @@ public class TileCache {
     private List<Integer> getTilesToLoad(int[] screenEdges, float scaleFactor) {
         List<Integer> tilesToLoad = new ArrayList<>();
 
-        int[] tileShifts = {13, 15, 17, 19};
-        float[] layerShifts = {2048, 4096, 16384};
-        int layer = scaleFactor > layerShifts[2] ? 0 : (scaleFactor > layerShifts[1] ? 1 : (scaleFactor > layerShifts[0] ? 2 : 3));
+        int layer = scaleFactor > VectorMapRenderer.LAYER_SHIFTS[2] ? 0 : (scaleFactor > VectorMapRenderer.LAYER_SHIFTS[1] ? 1 : (scaleFactor > VectorMapRenderer.LAYER_SHIFTS[0] ? 2 : 3));
 
         // prio 1: tiles on screen
-        int tx0 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[0] >> tileShifts[layer];
-        int ty0 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[1] >> tileShifts[layer];
-        int tx1 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[2] >> tileShifts[layer];
-        int ty1 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[3] >> tileShifts[layer];
+        int tx0 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[0] >> VectorMapRenderer.TILE_SHIFTS[layer];
+        int ty0 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[1] >> VectorMapRenderer.TILE_SHIFTS[layer];
+        int tx1 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[2] >> VectorMapRenderer.TILE_SHIFTS[layer];
+        int ty1 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[3] >> VectorMapRenderer.TILE_SHIFTS[layer];
 
         for (int ty = ty0; ty <= ty1; ++ty)
             for (int tx = tx0; tx <= tx1; ++tx)
                 tilesToLoad.add(VectorMapRenderer.getTilePos(layer, tx, ty));
 
         // prio 2: one level zoomed out (plus surroundings)
-        if (layer+1 < tileShifts.length) {
-            int p1x0 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[0] >> tileShifts[layer + 1];
-            int p1y0 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[1] >> tileShifts[layer + 1];
-            int p1x1 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[2] >> tileShifts[layer + 1];
-            int p1y1 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[3] >> tileShifts[layer + 1];
+        if (layer+1 < VectorMapRenderer.TILE_SHIFTS.length) {
+            int p1x0 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[0] >> VectorMapRenderer.TILE_SHIFTS[layer + 1];
+            int p1y0 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[1] >> VectorMapRenderer.TILE_SHIFTS[layer + 1];
+            int p1x1 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[2] >> VectorMapRenderer.TILE_SHIFTS[layer + 1];
+            int p1y1 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[3] >> VectorMapRenderer.TILE_SHIFTS[layer + 1];
 
             for (int ty = p1y0-1; ty <= p1y1+1; ++ty)
                 for (int tx = p1x0-1; tx <= p1x1+1; ++tx)
@@ -136,10 +134,10 @@ public class TileCache {
 
         // prio 4: one level zoomed in
         if (layer-1 >= 0) {
-            int m1x0 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[0] >> tileShifts[layer - 1];
-            int m1y0 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[1] >> tileShifts[layer - 1];
-            int m1x1 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[2] >> tileShifts[layer - 1];
-            int m1y1 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[3] >> tileShifts[layer - 1];
+            int m1x0 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[0] >> VectorMapRenderer.TILE_SHIFTS[layer - 1];
+            int m1y0 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[1] >> VectorMapRenderer.TILE_SHIFTS[layer - 1];
+            int m1x1 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[2] >> VectorMapRenderer.TILE_SHIFTS[layer - 1];
+            int m1y1 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[3] >> VectorMapRenderer.TILE_SHIFTS[layer - 1];
 
             for (int ty = m1y0; ty <= m1y1; ++ty)
                 for (int tx = m1x0; tx <= m1x1; ++tx)
@@ -149,26 +147,19 @@ public class TileCache {
         return tilesToLoad;
     }
 
-
-//    Random rnd = new Random();
-
     /** Delete unused tiles and start loading new ones into cache (asynchronously). */
     private void refresh(final List<Integer> tilesToLoad) {
-//        Log.d("TileCache", "Removing "+workQueue.size() + " entries from work queue");
         workQueue.clear();
-
-//        final int R = rnd.nextInt();
-//        Log.d("TileCache", R+" tiles to load: "+tilesToLoad);
 
         // delete unused tiles from cache, memory and GPU
         Map<Integer, Tile> tilesToDelete = new HashMap<>(cache);
         tilesToDelete.keySet().removeAll(tilesToLoad);
         for (Tile tile : tilesToDelete.values()) {
-            if (tile.size == 3) continue; // never delete most zoomed out layer
-//            Log.d("TileCache", R+" deleting tile: "+getTilePos(tile.size, tile.tx, tile.ty));
-            tile.delete();
-            int tp = VectorMapRenderer.getTilePos(tile.size, tile.tx, tile.ty);
-            cache.remove(tp);
+            if (tile.size < VectorMapRenderer.TILE_SHIFTS.length-1) { // never delete most zoomed out layer
+                tile.delete();
+                int tp = VectorMapRenderer.getTilePos(tile.size, tile.tx, tile.ty);
+                cache.remove(tp);
+            }
         }
 
         // start loading new tiles
@@ -176,14 +167,10 @@ public class TileCache {
             if (existingTiles.contains(tp)) {
                 tileLoaderExecutor.execute(new Runnable() {
                     @Override public void run() {
-//                        Log.d("TileCache", R+" requesting from cache: "+tp);
                         get(tp, false);
                     }
                 });
             }
         }
-
-//        Log.d("TileCache", R+" tiles loaded: "+loadedTiles.keySet());
-//        Log.d("TileCache", "Tiles to load: " + sb);
     }
 }
