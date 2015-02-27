@@ -138,6 +138,10 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 //        }
 //        Log.v("View", "Triangles drawn: " + Tile.trisDrawn);
 
+        // Idea: Loop over the tile layer zoomed out one step. For each outer tile, see if all its
+        // inner (zoomed in) tiles are loaded. If not, fall back to rendering the zoomed out tile
+        // (to avoid freezing the app while loading tiles from disk). This also allows us to blend
+        // two neighboring tile layers easily.
         int tx0p1 = tx0 >> 2, ty0p1 = ty0 >> 2, tx1p1 = tx1 >> 2, ty1p1 = ty1 >> 2;
         for (int typ1 = ty0p1; typ1 <= ty1p1; ++typ1) {
             for (int txp1 = tx0p1; txp1 <= tx1p1; ++txp1) {
@@ -172,6 +176,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                     if (tile != null)
                         tile.draw(glProgram, 1.0f);
                 } else {
+                    // always draw zoomed in tiles like normal (even when blending)
                     for (int ty = Math.max(ty0, typ1 << 2); ty <= Math.min(ty1, (typ1 << 2) + 3); ++ty) {
                         for (int tx = Math.max(tx0, txp1 << 2); tx <= Math.min(tx1, (txp1 << 2) + 3); ++tx) {
                             int tp = getTilePos(layer, tx, ty);
@@ -180,42 +185,23 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                                 tile.draw(glProgram, 1.0f);
                         }
                     }
+
+                    // optional blending layer
+                    if (layer < TILE_SHIFTS.length - 1) {
+                        float blend = 2 - scaleFactor / LAYER_SHIFTS[LAYER_SHIFTS.length-1-layer];
+                        if (blend > 0) {
+                            GLES20.glEnable(GLES20.GL_BLEND);
+                            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+                            Tile tile = tileCache.get(zoomedOutTilePos, true);
+                            if (tile != null)
+                                tile.draw(glProgram, blend);
+                            GLES20.glDisable(GLES20.GL_BLEND);
+                        }
+                    }
                 }
             }
         }
-
-//        float[] layerShifts = {2048,4096, 8192,16384};
-//
-//        // Draw triangles
-//        GLES20.glDisable(GLES20.GL_BLEND);
-//        if (scaleFactor < layerShifts[0]) {
-//            drawLayer(scratch, 2);
-//        } else if (scaleFactor < layerShifts[1]) {
-//            blendLayers(scratch, 1, 2, (layerShifts[1]-scaleFactor)/layerShifts[0]);
-//        } else if (scaleFactor < layerShifts[2]) {
-//            drawLayer(scratch, 1);
-//        } else if (scaleFactor < layerShifts[3]) {
-//            blendLayers(scratch, 0, 1, (layerShifts[3]-scaleFactor)/layerShifts[2]);
-//        } else {
-//            drawLayer(scratch, 0);
-//        }
     }
-
-//    void drawLayer(float[] mvpMatrix, int layer) { drawLayer(mvpMatrix, layer, 1.0f); }
-//
-//    void drawLayer(float[] mvpMatrix, int layer, float blend) {
-//        for (Triangle tri : mTris.get(layer))
-//            tri.draw(mvpMatrix, blend);
-//    }
-//
-//    void blendLayers(float[] mvpMatrix, int layer1, int layer2, float blend) {
-//        drawLayer(mvpMatrix, layer1);
-//
-//        GLES20.glEnable(GLES20.GL_BLEND);
-//        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
-//        drawLayer(mvpMatrix, layer2, blend);
-//        GLES20.glDisable(GLES20.GL_BLEND);
-//    }
 
     @Override
     public void onSurfaceChanged(GL10 unused, int width, int height) {
@@ -227,6 +213,5 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
         // this projection matrix is applied to object coordinates in the onDrawFrame() method
         Matrix.frustumM(mProjectionMatrix, 0, -screenRatio, screenRatio, -1f, 1f, nearPlane, 16384);
-
     }
 }
