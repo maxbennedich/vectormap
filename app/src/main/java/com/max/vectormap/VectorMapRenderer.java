@@ -10,25 +10,6 @@ import javax.microedition.khronos.opengles.GL10;
 
 import android.util.Log;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingDeque;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-
 /**
  * Provides drawing instructions for a GLSurfaceView object. This class
  * must override the OpenGL ES drawing lifecycle methods:
@@ -146,7 +127,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 //        Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
         Log.v("TileCache", String.format("%.0f kb in GPU, %.0f kb in memory, %.0f kb ever allocated", Tile.gpuBytes / 1024.0, Tile.bufferBytes / 1024.0, Tile.bufferBytesEverAllocated / 1024.0));
 
-        updateTilesToLoad();
+        tileCache.refreshForPosition(screenEdges, scaleFactor);
 
 //        Tile.trisDrawn = 0;
 //        for (int tp : tileCache.existingTiles) {
@@ -217,102 +198,6 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 //        } else {
 //            drawLayer(scratch, 0);
 //        }
-    }
-
-    BlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<Runnable>();
-    ThreadPoolExecutor tileDiskLoaderExecutor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, workQueue);
-
-    Random rnd = new Random();
-
-    private void updateTiles(final List<Integer> tilesToLoad) {
-//        Log.d("TileCache", "Removing "+workQueue.size() + " entries from work queue");
-        workQueue.clear();
-
-        final int R = rnd.nextInt();
-//        Log.d("TileCache", R+" tiles to load: "+tilesToLoad);
-
-        Map<Integer, Tile> tilesToDelete = new HashMap<>(tileCache.cache);
-        tilesToDelete.keySet().removeAll(tilesToLoad);
-        for (Tile tile : tilesToDelete.values()) {
-            if (tile.size == 3) continue; // never delete most zoomed out layer
-//            Log.d("TileCache", R+" deleting tile: "+getTilePos(tile.size, tile.tx, tile.ty));
-            tile.delete();
-            int tp = getTilePos(tile.size, tile.tx, tile.ty);
-            tileCache.cache.remove(tp);
-        }
-
-        for (final int tp : tilesToLoad) {
-            if (tileCache.existingTiles.contains(tp)) {
-                tileDiskLoaderExecutor.execute(new Runnable() {
-                    @Override public void run() {
-//                        Log.d("TileCache", R+" requesting from cache: "+tp);
-                        tileCache.get(tp, false);
-                    }
-                });
-            }
-        }
-
-//        Log.d("TileCache", R+" tiles loaded: "+loadedTiles.keySet());
-//        Log.d("TileCache", "Tiles to load: " + sb);
-    }
-
-    /**
-     * Based on camera position and potentially other factors, figure out which tiles are either
-     * needed right away or could be needed within short (e.g. if user pans or zooms).
-     */
-    void updateTilesToLoad() {
-        List<Integer> tilesToLoad = new ArrayList<>();
-
-        getScreenEdges(screenEdges);
-        int[] tileShifts = {13, 15, 17, 19};
-        float[] layerShifts = {2048, 4096, 16384};
-        int layer = scaleFactor > layerShifts[2] ? 0 : (scaleFactor > layerShifts[1] ? 1 : (scaleFactor > layerShifts[0] ? 2 : 3));
-
-        // prio 1: tiles on screen
-        int tx0 = GLOBAL_OFS_X + screenEdges[0] >> tileShifts[layer];
-        int ty0 = GLOBAL_OFS_Y + screenEdges[1] >> tileShifts[layer];
-        int tx1 = GLOBAL_OFS_X + screenEdges[2] >> tileShifts[layer];
-        int ty1 = GLOBAL_OFS_Y + screenEdges[3] >> tileShifts[layer];
-
-        for (int ty = ty0; ty <= ty1; ++ty)
-            for (int tx = tx0; tx <= tx1; ++tx)
-                tilesToLoad.add(getTilePos(layer, tx, ty));
-
-        // prio 2: one level zoomed out (plus surroundings)
-        if (layer+1 < tileShifts.length) {
-            int p1x0 = GLOBAL_OFS_X + screenEdges[0] >> tileShifts[layer + 1];
-            int p1y0 = GLOBAL_OFS_Y + screenEdges[1] >> tileShifts[layer + 1];
-            int p1x1 = GLOBAL_OFS_X + screenEdges[2] >> tileShifts[layer + 1];
-            int p1y1 = GLOBAL_OFS_Y + screenEdges[3] >> tileShifts[layer + 1];
-
-            for (int ty = p1y0-1; ty <= p1y1+1; ++ty)
-                for (int tx = p1x0-1; tx <= p1x1+1; ++tx)
-                    tilesToLoad.add(getTilePos(layer + 1, tx, ty));
-        }
-
-        // prio 3: regular zoom level, just outside screen
-        for (int tx = tx0-1; tx <= tx1+1; ++tx) {
-            tilesToLoad.add(getTilePos(layer, tx, ty0-1));
-            tilesToLoad.add(getTilePos(layer, tx, ty1+1));
-        }
-        for (int ty = ty0; ty <= ty1; ++ty) {
-            tilesToLoad.add(getTilePos(layer, tx0-1, ty));
-            tilesToLoad.add(getTilePos(layer, tx1+1, ty));
-        }
-
-        // prio 4: one level zoomed in
-        if (layer-1 >= 0) {
-            int m1x0 = GLOBAL_OFS_X + screenEdges[0] >> tileShifts[layer - 1];
-            int m1y0 = GLOBAL_OFS_Y + screenEdges[1] >> tileShifts[layer - 1];
-            int m1x1 = GLOBAL_OFS_X + screenEdges[2] >> tileShifts[layer - 1];
-            int m1y1 = GLOBAL_OFS_Y + screenEdges[3] >> tileShifts[layer - 1];
-
-            for (int ty = m1y0; ty <= m1y1; ++ty)
-                for (int tx = m1x0; tx <= m1x1; ++tx)
-                    tilesToLoad.add(getTilePos(layer - 1, tx, ty));
-        }
-
-        updateTiles(tilesToLoad);
     }
 
 //    void drawLayer(float[] mvpMatrix, int layer) { drawLayer(mvpMatrix, layer, 1.0f); }

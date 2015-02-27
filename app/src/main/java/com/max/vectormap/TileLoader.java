@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/** This class deals with loading tiles from disk. It is NOT thread safe. */
 public class TileLoader {
     private final Context context;
 
