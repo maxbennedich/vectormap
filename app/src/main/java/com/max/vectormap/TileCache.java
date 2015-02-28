@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -36,16 +37,16 @@ public class TileCache {
     private final Context context;
     private final TileLoader tileLoader;
 
-    /** Queue of individual tile loading jobs. */
-    private final BlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>();
-
-    private final ThreadPoolExecutor tileLoaderExecutor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, workQueue);
+    private final TileDiskLoader tileDiskLoader;
 
     /** Creates a new tile cache and inventories all tiles available on disk. */
     public TileCache(Context context) {
         this.context = context;
         tileLoader = new TileLoader(context);
         inventoryTris();
+
+        tileDiskLoader = new TileDiskLoader();
+        new Thread(tileDiskLoader).start();
     }
 
     /** Does not load anything from disk, only inventories what's there. */
@@ -155,9 +156,22 @@ public class TileCache {
         }
     }
 
+    class TileDiskLoader implements Runnable {
+        BlockingQueue<Integer> tilesToLoad = new LinkedBlockingDeque<>();
+
+        @Override public void run() {
+            try {
+                while (true)
+                    get(tilesToLoad.take(), false);
+            } catch (InterruptedException ex) {
+                throw new RuntimeException("Unexpected interruption", ex);
+            }
+        }
+    }
+    
     /** Delete unused tiles and start loading new ones into cache (asynchronously). */
     private void refresh() {
-        workQueue.clear();
+        tileDiskLoader.tilesToLoad.clear();
 
         // delete unused tiles from cache, memory and GPU
         for (int k = 0; k < tilesToLoadCount; ++k)
@@ -175,13 +189,8 @@ public class TileCache {
         // start loading new tiles
         for (int k = 0; k < tilesToLoadCount; ++k) {
             final int tp = tilesToLoad[k];
-            if (existingTiles.contains(tp)) {
-                tileLoaderExecutor.execute(new Runnable() {
-                    @Override public void run() {
-                        get(tp, false);
-                    }
-                });
-            }
+            if (existingTiles.contains(tp))
+                tileDiskLoader.tilesToLoad.add(tp);
         }
     }
 }

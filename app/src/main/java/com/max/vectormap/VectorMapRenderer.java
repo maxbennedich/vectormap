@@ -206,6 +206,8 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
             }
         }
 
+//        tileCache.get(738032, true).draw(glProgram, 1.0f); // for debugging
+
         logFPS();
     }
 
