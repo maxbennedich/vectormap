@@ -69,10 +69,13 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
     }
 
     private long prevNanoTime = System.nanoTime();
+    private long startOnDrawNanoTime;
 
     private void logFPS() {
         long time = System.nanoTime();
-        Log.v("PerfLog", String.format("FPS=%.1f", 1e9/(time-prevNanoTime)));
+        long fpsTime = time - prevNanoTime;
+        long onDrawTime = time - startOnDrawNanoTime;
+        Log.v("PerfLog", String.format("FPS: %.1f, time: %.1f ms, ondraw: %.1f ms, tris: %d", 1e9/fpsTime, fpsTime/1e6, onDrawTime/1e6, Tile.trisDrawn));
         prevNanoTime = time;
     }
 
@@ -106,7 +109,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
     @Override
     public void onDrawFrame(GL10 unused) {
-        logFPS();
+        startOnDrawNanoTime = System.nanoTime();
 
         // Draw background color
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
@@ -131,7 +134,7 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
 
         tileCache.refreshForPosition(screenEdges, scaleFactor);
 
-//        Tile.trisDrawn = 0;
+        Tile.trisDrawn = 0;
 //        for (int tp : tileCache.existingTiles) {
 //            Tile tile = tileCache.get(tp);
 //            if (tile != null && tile.size == 0)
@@ -202,6 +205,8 @@ public class VectorMapRenderer implements GLSurfaceView.Renderer {
                 }
             }
         }
+
+        logFPS();
     }
 
     @Override

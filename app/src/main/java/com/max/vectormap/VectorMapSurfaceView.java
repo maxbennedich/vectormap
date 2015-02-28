@@ -31,7 +31,7 @@ class VectorMapSurfaceView extends GLSurfaceView {
         setRenderer(mRenderer);
 
         // Render the view only when there is a change in the drawing data
-        setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+//        setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
     }
 
     float screenMidX, screenMidY;
@@ -76,7 +76,7 @@ class VectorMapSurfaceView extends GLSurfaceView {
 
 //                    Log.v("Touch", "dx="+dx+", dy="+dy+", x="+(mRenderer.centerUtmX+ VectorMapRenderer.GLOBAL_OFS_X)+", y="+(mRenderer.centerUtmY+ VectorMapRenderer.GLOBAL_OFS_Y)+", scale="+mRenderer.scaleFactor);
 
-                    requestRender();
+//                    requestRender();
                 }
                 break;
             case MotionEvent.ACTION_POINTER_DOWN:
@@ -139,7 +139,7 @@ class VectorMapSurfaceView extends GLSurfaceView {
             prevFocusX = focusX;
             prevFocusY = focusY;
 
-            requestRender();
+//            requestRender();
 
             return true;
         }

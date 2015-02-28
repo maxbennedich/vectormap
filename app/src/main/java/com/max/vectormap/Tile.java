@@ -179,6 +179,7 @@ public class Tile {
         }
 
         gpuBytes += tileGpuBytes;
+//        Log.d("TileCache", "LOAD TO GL: " + tileGpuBytes + " bytes");
 
         loadedToGL = true;
     }
