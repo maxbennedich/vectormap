@@ -6,7 +6,9 @@ import android.util.Pair;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,7 +26,7 @@ public class TileLoader {
 
     int[] breakpoints = new int[4];
 
-    private final static int MAX_VERTEX_COUNT = 65534;
+    public final static int MAX_VERTEX_COUNT = 65534;
     int[] intVerts = new int[MAX_VERTEX_COUNT];
     int[] newOrder = new int[MAX_VERTEX_COUNT];
     float[] verts = new float[MAX_VERTEX_COUNT*2];
@@ -83,6 +85,15 @@ public class TileLoader {
         }
     }
 
+    private static byte[] assetBuffer = new byte[65536];
+
+    static class CustomBufferInputStream extends BufferedInputStream {
+        public CustomBufferInputStream(InputStream in, byte[] buffer) {
+            super(in, 1); // allocate the minimum buffer possible (somewhat of a hack)
+            buf = buffer;
+        }
+    }
+
     /** Never returns null. */
     public Tile loadTile(int tp) {
         int layer = VectorMapRenderer.getLayer(tp);
@@ -91,7 +102,8 @@ public class TileLoader {
 
         String tileName = "tris/tri_" + size + "_" + tx + "_" + ty + ".tri";
 
-        try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(tileName), 65536))) {
+        try (DataInputStream dis = new DataInputStream(new CustomBufferInputStream(context.getAssets().open(tileName), assetBuffer))) {
+//            try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(tileName), 65536))) {
             // per tile header data
             int vertexCount = dis.readInt();
             if (vertexCount > MAX_VERTEX_COUNT)

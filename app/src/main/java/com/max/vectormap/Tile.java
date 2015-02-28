@@ -1,9 +1,12 @@
 package com.max.vectormap;
 
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.ShortBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import android.opengl.GLES20;
@@ -18,16 +21,8 @@ public class Tile {
     final int size;
     final int tx, ty;
 
-    public static final Object LOCK = new Object();
-
     /** Bytes currently loaded into GPU memory. */
     public static int gpuBytes = 0;
-
-    /** Bytes currently held in direct buffers (waiting to be loaded into GPU). */
-    public static int bufferBytes;
-
-    /** Bytes ever allocated in direct buffers. */
-    public static int bufferBytesEverAllocated;
 
     private int tileGpuBytes;
 
@@ -36,9 +31,10 @@ public class Tile {
     final int[] vbo = new int[1];
 
     // per surface type data
-    final int[] ibo;
-    final int[] indexCount;
-    final float[][] color;
+    private final int[] ibo;
+    private final int vertexCount;
+    private final int[] indexCount;
+    private final float[][] color;
 
     private static final int COORDS_PER_VERTEX = 2;
 
@@ -46,28 +42,96 @@ public class Tile {
         return new float[] {(rgb>>16) / 255f, (rgb>>8&0xff) / 255f, (rgb&0xff) / 255f, 0};
     }
 
+    static class ClaimableBuffer<B extends Buffer> {
+        B buffer;
+        boolean claimed;
+
+        ClaimableBuffer(B buffer, boolean claimed) {
+            this.buffer = buffer;
+            this.claimed = claimed;
+        }
+    }
+
+    ClaimableBuffer<FloatBuffer> tmpVertexBuffer;
+    ClaimableBuffer<ShortBuffer>[] tmpIndexBuffers;
+
+    static List<ClaimableBuffer<FloatBuffer>> vertexBuffers = new ArrayList<>();
+    static List<ClaimableBuffer<ShortBuffer>> indexBuffers = new ArrayList<>();
+
+    private static final Object VERTEX_BUFFER_LOCK = new Object();
+
+    // TODO share with method below for index buffer
+    static ClaimableBuffer<FloatBuffer> getFreeVertexBuffer(int elements) {
+        synchronized (VERTEX_BUFFER_LOCK) {
+            int insertionIdx = -1;
+            for (int k = 0; k < vertexBuffers.size(); ++k) {
+                if (elements > vertexBuffers.get(k).buffer.capacity())
+                    continue; // buffer is too small
+
+                if (insertionIdx == -1)
+                    insertionIdx = k; // insert new buffer at this position, if needed
+
+                if (!vertexBuffers.get(k).claimed) {
+                    vertexBuffers.get(k).claimed = true;
+                    return vertexBuffers.get(k);
+                }
+            }
+
+            // insert new buffer
+            ClaimableBuffer<FloatBuffer> newBuffer = new ClaimableBuffer<>(
+                    ByteBuffer.allocateDirect(elements * Constants.BYTES_IN_FLOAT).order(ByteOrder.nativeOrder()).asFloatBuffer(), true);
+            vertexBuffers.add(insertionIdx == -1 ? vertexBuffers.size() : insertionIdx, newBuffer);
+            Log.d("TileCache", "Created new vertex buffer at position "+insertionIdx+"/"+vertexBuffers.size()+": "+((elements*Constants.BYTES_IN_FLOAT+512)/1024)+" kb");
+            return newBuffer;
+        }
+    }
+
+    private static final Object INDEX_BUFFER_LOCK = new Object();
+
+    static ClaimableBuffer<ShortBuffer> getFreeIndexBuffer(int elements) {
+        synchronized (INDEX_BUFFER_LOCK) {
+            int insertionIdx = -1;
+            for (int k = 0; k < indexBuffers.size(); ++k) {
+                if (elements > indexBuffers.get(k).buffer.capacity())
+                    continue; // buffer is too small
+
+                if (insertionIdx == -1)
+                    insertionIdx = k; // insert new buffer at this position, if needed
+
+                if (!indexBuffers.get(k).claimed) {
+                    indexBuffers.get(k).claimed = true;
+                    return indexBuffers.get(k);
+                }
+            }
+
+            // insert new buffer
+            ClaimableBuffer<ShortBuffer> newBuffer = new ClaimableBuffer<>(
+                    ByteBuffer.allocateDirect(elements * Constants.BYTES_IN_SHORT).order(ByteOrder.nativeOrder()).asShortBuffer(), true);
+            indexBuffers.add(insertionIdx == -1 ? indexBuffers.size() : insertionIdx, newBuffer);
+            Log.d("TileCache", "Created new index buffer at position "+insertionIdx+"/"+indexBuffers.size()+": "+((elements*Constants.BYTES_IN_SHORT+512)/1024)+" kb");
+            return newBuffer;
+        }
+    }
+
     /**
      * Puts data in appropriate buffers for future loading to GL. This method is GL agnostic and
      * does therefore not need to be called in the GL thread.
+     * NOTE: This method is accessed by multiple threads (loading thread and GL thread).
      */
     public Tile(int size, int tx, int ty, float[] verts, int vertexCount, Map<Integer, Pair<short[], Integer>> trisByType) {
         this.size = size;
         this.tx = tx;
         this.ty = ty;
 
-//        tileGpuBytes = GLHelper.createVertexBuffer(verts, vbo);
-        int vertexSize = vertexCount * 2 * Constants.BYTES_IN_FLOAT;
-        tmpVertexBuffer = ByteBuffer.allocateDirect(vertexSize).order(ByteOrder.nativeOrder()).asFloatBuffer();
-        tmpVertexBuffer.put(verts, 0, vertexCount * 2).position(0);
-        synchronized (LOCK) {
-            bufferBytes += vertexSize;
-            bufferBytesEverAllocated += vertexSize;
-        }
+        this.vertexCount = vertexCount;
+
+        tmpVertexBuffer = getFreeVertexBuffer(vertexCount * 2);
+        tmpVertexBuffer.buffer.put(verts, 0, vertexCount * 2).position(0);
 
         ibo = new int[trisByType.size()];
-        indexCount = new int[trisByType.size()];
         color = new float[trisByType.size()][];
-        tmpIndexBuffers = new ShortBuffer[trisByType.size()];
+        indexCount = new int[trisByType.size()];
+        tmpIndexBuffers = new ClaimableBuffer[trisByType.size()];
 
         // create an index array for each surface type (color)
         int type = 0;
@@ -77,14 +141,8 @@ public class Tile {
             color[type] = rgb(Constants.COLORS_NEW[tris.getKey()]);
 //          color[0]/=2; color[1]/=2; color[2]/=2; // for testing overdraw
 
-//            tileGpuBytes += GLHelper.createVertexIndexBuffer(tris.getValue(), ibo, type);
-            int indexSize = indexCount[type] * Constants.BYTES_IN_SHORT;
-            tmpIndexBuffers[type] = ByteBuffer.allocateDirect(indexSize).order(ByteOrder.nativeOrder()).asShortBuffer();
-            tmpIndexBuffers[type].put(tris.getValue().first, 0, indexCount[type]).position(0);
-            synchronized (LOCK) {
-                bufferBytes += indexSize;
-                bufferBytesEverAllocated += indexSize;
-            }
+            tmpIndexBuffers[type] = getFreeIndexBuffer(indexCount[type]);
+            tmpIndexBuffers[type].buffer.put(tris.getValue().first, 0, indexCount[type]).position(0);
 
             ++type;
         }
@@ -92,43 +150,35 @@ public class Tile {
         Log.i("PerfLog", String.format("Loaded %d tris, %d verts", vertexCount / 6, vertexCount / 2));
     }
 
-    FloatBuffer tmpVertexBuffer;
-    ShortBuffer[] tmpIndexBuffers;
-
     /** Must be executed in GL thread. */
     private void loadToGL() {
         GLES20.glGenBuffers(1, vbo, 0);
-        int bytes = tmpVertexBuffer.capacity() * Constants.BYTES_IN_FLOAT;
+        int bytes = vertexCount * 2 * Constants.BYTES_IN_FLOAT;
         if (vbo[0] > 0) {
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[0]);
-            GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, bytes, tmpVertexBuffer, GLES20.GL_STATIC_DRAW);
+            GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, bytes, tmpVertexBuffer.buffer, GLES20.GL_STATIC_DRAW);
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
         } else {
             throw new RuntimeException("Buffer error: "+vbo[0]);
         }
         tileGpuBytes = bytes;
-        tmpVertexBuffer.limit(0);
-        tmpVertexBuffer = null;
+        tmpVertexBuffer.claimed = false;
 
         for (int t = 0; t < tmpIndexBuffers.length; ++t) {
             GLES20.glGenBuffers(1, ibo, t);
-            bytes = tmpIndexBuffers[t].capacity() * Constants.BYTES_IN_SHORT;
+            bytes = indexCount[t] * Constants.BYTES_IN_SHORT;
             if (ibo[t] > 0) {
                 GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[t]);
-                GLES20.glBufferData(GLES20.GL_ELEMENT_ARRAY_BUFFER, bytes, tmpIndexBuffers[t], GLES20.GL_STATIC_DRAW);
+                GLES20.glBufferData(GLES20.GL_ELEMENT_ARRAY_BUFFER, bytes, tmpIndexBuffers[t].buffer, GLES20.GL_STATIC_DRAW);
                 GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
             } else {
                 throw new RuntimeException("Buffer error: " + ibo[t]);
             }
             tileGpuBytes += bytes;
-            tmpIndexBuffers[t].limit(0);
-            tmpIndexBuffers[t] = null;
+            tmpIndexBuffers[t].claimed = false;
         }
 
-        synchronized (LOCK) {
-            bufferBytes -= tileGpuBytes;
-            gpuBytes += tileGpuBytes;
-        }
+        gpuBytes += tileGpuBytes;
 
         loadedToGL = true;
     }
@@ -136,24 +186,11 @@ public class Tile {
     /** Release any memory held by this tile, either in buffer or in GL. Must be run in GL thread. */
     public void delete() {
         if (!loadedToGL) {
-            int bytes = tmpVertexBuffer.capacity() * Constants.BYTES_IN_FLOAT;
-            tmpVertexBuffer.limit(0);
-            tmpVertexBuffer = null;
-
-            for (int t = 0; t < tmpIndexBuffers.length; ++t) {
-                bytes += tmpIndexBuffers[t].capacity() * Constants.BYTES_IN_SHORT;
-                tmpIndexBuffers[t].limit(0);
-                tmpIndexBuffers[t] = null;
-            }
-
-            synchronized (LOCK) {
-                bufferBytes -= bytes;
-            }
+            tmpVertexBuffer.claimed = false;
+            for (int t = 0; t < tmpIndexBuffers.length; ++t)
+                tmpIndexBuffers[t].claimed = false;
         } else {
-            synchronized (LOCK) {
-                gpuBytes -= tileGpuBytes;
-            }
-
+            gpuBytes -= tileGpuBytes;
             GLES20.glDeleteBuffers(1, vbo, 0);
             GLES20.glDeleteBuffers(ibo.length, ibo, 0);
         }
@@ -195,9 +232,5 @@ public class Tile {
 
         GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
-    }
-
-    public int getGPUBytes() {
-        return tileGpuBytes;
     }
 }

@@ -6,6 +6,7 @@ import android.util.Log;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -19,6 +20,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * TODO: This class submits asynchronous jobs to load tiles from disk, but the deletion and loading
+ * TODO: into GL is not asynchronous, but rather done on each frame update. If frame updates are
+ * TODO: not frequent enough (e.g. if they only happen when the user moves), a large number of tiles
+ * TODO: may be loaded into memory and kept there.
+ */
 public class TileCache {
 
     Map<Integer, Tile> cache = new ConcurrentHashMap<>();
@@ -87,17 +94,20 @@ public class TileCache {
     }
 
     public void refreshForPosition(int[] screenEdges, float scaleFactor) {
-        List<Integer> tilesToLoad = getTilesToLoad(screenEdges, scaleFactor);
-        refresh(tilesToLoad);
+        getTilesToLoad(screenEdges, scaleFactor);
+        refresh();
     }
+
+    private int[] tilesToLoadSorted = new int[256];
+    private int[] tilesToLoad = new int[256];
+    int tilesToLoadCount = 0;
 
     /**
      * Based on camera position and potentially other factors, figure out which tiles are either
      * needed right away or could be needed within short (e.g. if user pans or zooms).
      */
-    private List<Integer> getTilesToLoad(int[] screenEdges, float scaleFactor) {
-        List<Integer> tilesToLoad = new ArrayList<>();
-
+    private void getTilesToLoad(int[] screenEdges, float scaleFactor) {
+        tilesToLoadCount = 0;
         int layer = scaleFactor > VectorMapRenderer.LAYER_SHIFTS[2] ? 0 : (scaleFactor > VectorMapRenderer.LAYER_SHIFTS[1] ? 1 : (scaleFactor > VectorMapRenderer.LAYER_SHIFTS[0] ? 2 : 3));
 
         // prio 1: tiles on screen
@@ -108,7 +118,7 @@ public class TileCache {
 
         for (int ty = ty0; ty <= ty1; ++ty)
             for (int tx = tx0; tx <= tx1; ++tx)
-                tilesToLoad.add(VectorMapRenderer.getTilePos(layer, tx, ty));
+                tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx, ty);
 
         // prio 2: one level zoomed out (plus surroundings)
         if (layer+1 < VectorMapRenderer.TILE_SHIFTS.length) {
@@ -119,17 +129,17 @@ public class TileCache {
 
             for (int ty = p1y0-1; ty <= p1y1+1; ++ty)
                 for (int tx = p1x0-1; tx <= p1x1+1; ++tx)
-                    tilesToLoad.add(VectorMapRenderer.getTilePos(layer + 1, tx, ty));
+                    tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer + 1, tx, ty);
         }
 
         // prio 3: regular zoom level, just outside screen
         for (int tx = tx0-1; tx <= tx1+1; ++tx) {
-            tilesToLoad.add(VectorMapRenderer.getTilePos(layer, tx, ty0 - 1));
-            tilesToLoad.add(VectorMapRenderer.getTilePos(layer, tx, ty1 + 1));
+            tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx, ty0 - 1);
+            tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx, ty1 + 1);
         }
         for (int ty = ty0; ty <= ty1; ++ty) {
-            tilesToLoad.add(VectorMapRenderer.getTilePos(layer, tx0 - 1, ty));
-            tilesToLoad.add(VectorMapRenderer.getTilePos(layer, tx1 + 1, ty));
+            tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx0 - 1, ty);
+            tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx1 + 1, ty);
         }
 
         // prio 4: one level zoomed in
@@ -141,29 +151,30 @@ public class TileCache {
 
             for (int ty = m1y0; ty <= m1y1; ++ty)
                 for (int tx = m1x0; tx <= m1x1; ++tx)
-                    tilesToLoad.add(VectorMapRenderer.getTilePos(layer - 1, tx, ty));
+                    tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer - 1, tx, ty);
         }
-
-        return tilesToLoad;
     }
 
     /** Delete unused tiles and start loading new ones into cache (asynchronously). */
-    private void refresh(final List<Integer> tilesToLoad) {
+    private void refresh() {
         workQueue.clear();
 
         // delete unused tiles from cache, memory and GPU
-        Map<Integer, Tile> tilesToDelete = new HashMap<>(cache);
-        tilesToDelete.keySet().removeAll(tilesToLoad);
-        for (Tile tile : tilesToDelete.values()) {
-            if (tile.size < VectorMapRenderer.TILE_SHIFTS.length-1) { // never delete most zoomed out layer
+        for (int k = 0; k < tilesToLoadCount; ++k)
+            tilesToLoadSorted[k] = tilesToLoad[k];
+        Arrays.sort(tilesToLoadSorted, 0, tilesToLoadCount);
+        for (Map.Entry<Integer, Tile> entry : cache.entrySet()) {
+            Tile tile = entry.getValue();
+            if (tile.size < VectorMapRenderer.TILE_SHIFTS.length - 1 && // never delete most zoomed out layer
+                    Arrays.binarySearch(tilesToLoadSorted, 0, tilesToLoadCount, entry.getKey()) < 0) { // not present among tiles to load
                 tile.delete();
-                int tp = VectorMapRenderer.getTilePos(tile.size, tile.tx, tile.ty);
-                cache.remove(tp);
+                cache.remove(entry.getKey());
             }
         }
 
         // start loading new tiles
-        for (final int tp : tilesToLoad) {
+        for (int k = 0; k < tilesToLoadCount; ++k) {
+            final int tp = tilesToLoad[k];
             if (existingTiles.contains(tp)) {
                 tileLoaderExecutor.execute(new Runnable() {
                     @Override public void run() {
