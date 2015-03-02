@@ -88,28 +88,46 @@ public class TileCache {
         return tile;
     }
 
-    public void refreshForPosition(int[] screenEdges, float scaleFactor) {
-        getTilesToLoad(screenEdges, scaleFactor);
-        refresh();
-    }
-
     private int[] tilesToLoadSorted = new int[256];
     private int[] tilesToLoad = new int[256];
     int tilesToLoadCount = 0;
+
+    private int layerOld = -1;
+    private int m1x0Old, m1y0Old, m1x1Old, m1y1Old;
 
     /**
      * Based on camera position and potentially other factors, figure out which tiles are either
      * needed right away or could be needed within short (e.g. if user pans or zooms).
      */
-    private void getTilesToLoad(int[] screenEdges, float scaleFactor) {
-        tilesToLoadCount = 0;
+    public void refreshForPosition(int[] screenEdges, float scaleFactor) {
+        // first figure out if potential set of tiles to load changed from previous frame
+        boolean setChanged = true;
+
         int layer = scaleFactor > ChoreographerRenderThread.LAYER_SHIFTS[2] ? 0 : (scaleFactor > ChoreographerRenderThread.LAYER_SHIFTS[1] ? 1 : (scaleFactor > ChoreographerRenderThread.LAYER_SHIFTS[0] ? 2 : 3));
+        int lm1 = Math.max(layer - 1, 0);
+        int m1x0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> ChoreographerRenderThread.TILE_SHIFTS[lm1];
+        int m1y0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> ChoreographerRenderThread.TILE_SHIFTS[lm1];
+        int m1x1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> ChoreographerRenderThread.TILE_SHIFTS[lm1];
+        int m1y1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> ChoreographerRenderThread.TILE_SHIFTS[lm1];
+
+        if (layer == layerOld && m1x0 == m1x0Old && m1y0 == m1y0Old && m1x1 == m1x1Old && m1y1 == m1y1Old) {
+            setChanged = false;
+        } else {
+            layerOld = layer;
+            m1x0Old = m1x0; m1y0Old = m1y0; m1x1Old = m1x1; m1y1Old = m1y1;
+        }
+
+        if (!setChanged)
+            return;
+
+        Log.d(ChoreographerActivity.TAG, "Tile set changed: "+m1x0+","+m1y0+","+m1x1+","+m1y1);
+
+        tilesToLoadCount = 0;
 
         // prio 1: tiles on screen
-        int tx0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> ChoreographerRenderThread.TILE_SHIFTS[layer];
-        int ty0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> ChoreographerRenderThread.TILE_SHIFTS[layer];
-        int tx1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> ChoreographerRenderThread.TILE_SHIFTS[layer];
-        int ty1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> ChoreographerRenderThread.TILE_SHIFTS[layer];
+        int tx0, ty0, tx1, ty1;
+        if (layer == 0) { tx0 = m1x0; ty0 = m1y0; tx1 = m1x1; ty1 = m1y1; }
+        else { tx0 = m1x0>>2; ty0 = m1y0>>2; tx1 = m1x1>>2; ty1 = m1y1>>2; }
 
         for (int ty = ty0; ty <= ty1; ++ty)
             for (int tx = tx0; tx <= tx1; ++tx)
@@ -117,13 +135,8 @@ public class TileCache {
 
         // prio 2: one level zoomed out (plus surroundings)
         if (layer+1 < ChoreographerRenderThread.TILE_SHIFTS.length) {
-            int p1x0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> ChoreographerRenderThread.TILE_SHIFTS[layer + 1];
-            int p1y0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> ChoreographerRenderThread.TILE_SHIFTS[layer + 1];
-            int p1x1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> ChoreographerRenderThread.TILE_SHIFTS[layer + 1];
-            int p1y1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> ChoreographerRenderThread.TILE_SHIFTS[layer + 1];
-
-            for (int ty = p1y0-1; ty <= p1y1+1; ++ty)
-                for (int tx = p1x0-1; tx <= p1x1+1; ++tx)
+            for (int ty = (ty0>>2)-1; ty <= (ty1>>2)+1; ++ty)
+                for (int tx = (tx0>>2)-1; tx <= (tx1>>2)+1; ++tx)
                     tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer + 1, tx, ty);
         }
 
@@ -139,15 +152,12 @@ public class TileCache {
 
         // prio 4: one level zoomed in
         if (layer-1 >= 0) {
-            int m1x0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> ChoreographerRenderThread.TILE_SHIFTS[layer - 1];
-            int m1y0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> ChoreographerRenderThread.TILE_SHIFTS[layer - 1];
-            int m1x1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> ChoreographerRenderThread.TILE_SHIFTS[layer - 1];
-            int m1y1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> ChoreographerRenderThread.TILE_SHIFTS[layer - 1];
-
             for (int ty = m1y0; ty <= m1y1; ++ty)
                 for (int tx = m1x0; tx <= m1x1; ++tx)
                     tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer - 1, tx, ty);
         }
+
+        refresh();
     }
 
     class TileDiskLoader implements Runnable {

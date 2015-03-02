@@ -296,13 +296,6 @@ public class ChoreographerRenderThread extends Thread {
         // TODO any updates here using 'elapsedSeconds'
     }
 
-//    float xpos, ypos;
-//
-//    public void move(float dx, float dy) {
-//        xpos += dx; ypos -= dy;
-//        mRect.setPosition(xpos, ypos);
-//    }
-
     /** Draws the scene. */
     private void draw() {
         GlUtil.checkGlError("draw start");
@@ -333,7 +326,7 @@ public class ChoreographerRenderThread extends Thread {
         int ty1 = GLOBAL_OFS_Y + screenEdges[3] >> TILE_SHIFTS[layer];
 
 //        Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
-        Log.v("TileCache", String.format("GPUx: %.0f kb", Tile.gpuBytes / 1024.0));
+//        Log.v("TileCache", String.format("GPUx: %.0f kb", Tile.gpuBytes / 1024.0));
 //        Log.v("TileCache", "Free vertex/index buffers: " + Tile.getFreeVertexBufferCount() + " / " + Tile.getFreeIndexBufferCount());
 
         tileCache.refreshForPosition(screenEdges, frameScaleFactor);
