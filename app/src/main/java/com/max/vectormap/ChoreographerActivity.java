@@ -27,6 +27,8 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
         SurfaceView sv = (SurfaceView) findViewById(R.id.surfaceView);
         sv.getHolder().addCallback(this);
 
+        //setPreserveEGLContextOnPause(true);
+
         zoomDetector = new ScaleGestureDetector(this, new ScaleListener());
     }
 

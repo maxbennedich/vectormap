@@ -62,7 +62,7 @@ public class TileCache {
                 int layer = size == 8192 ? 0 : (size == 32768 ? 1 : (size == 131072 ? 2 : (size == 524288 ? 3 : -1)));
                 int tx = Integer.valueOf(m.group(2));
                 int ty = Integer.valueOf(m.group(3));
-                int tilePos = VectorMapRenderer.getTilePos(layer, tx, ty);
+                int tilePos = ChoreographerRenderThread.getTilePos(layer, tx, ty);
                 existingTiles.add(tilePos);
             }
         }
@@ -81,7 +81,7 @@ public class TileCache {
             synchronized (this) {
                 if ((tile = cache.get(tilePos)) == null) { // test again in case another thread just populated it
                     cache.put(tilePos, tile = tileLoader.loadTile(tilePos));
-                    Log.d("TileCache", (logCacheMiss ? "CACHE MISS: " : "") + "Loaded tile " + VectorMapRenderer.getTilePos(tile.size, tile.tx, tile.ty));
+                    Log.d("TileCache", (logCacheMiss ? "CACHE MISS: " : "") + "Loaded tile " + ChoreographerRenderThread.getTilePos(tile.size, tile.tx, tile.ty));
                 }
             }
         }
@@ -103,50 +103,50 @@ public class TileCache {
      */
     private void getTilesToLoad(int[] screenEdges, float scaleFactor) {
         tilesToLoadCount = 0;
-        int layer = scaleFactor > VectorMapRenderer.LAYER_SHIFTS[2] ? 0 : (scaleFactor > VectorMapRenderer.LAYER_SHIFTS[1] ? 1 : (scaleFactor > VectorMapRenderer.LAYER_SHIFTS[0] ? 2 : 3));
+        int layer = scaleFactor > ChoreographerRenderThread.LAYER_SHIFTS[2] ? 0 : (scaleFactor > ChoreographerRenderThread.LAYER_SHIFTS[1] ? 1 : (scaleFactor > ChoreographerRenderThread.LAYER_SHIFTS[0] ? 2 : 3));
 
         // prio 1: tiles on screen
-        int tx0 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[0] >> VectorMapRenderer.TILE_SHIFTS[layer];
-        int ty0 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[1] >> VectorMapRenderer.TILE_SHIFTS[layer];
-        int tx1 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[2] >> VectorMapRenderer.TILE_SHIFTS[layer];
-        int ty1 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[3] >> VectorMapRenderer.TILE_SHIFTS[layer];
+        int tx0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> ChoreographerRenderThread.TILE_SHIFTS[layer];
+        int ty0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> ChoreographerRenderThread.TILE_SHIFTS[layer];
+        int tx1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> ChoreographerRenderThread.TILE_SHIFTS[layer];
+        int ty1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> ChoreographerRenderThread.TILE_SHIFTS[layer];
 
         for (int ty = ty0; ty <= ty1; ++ty)
             for (int tx = tx0; tx <= tx1; ++tx)
-                tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx, ty);
+                tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx, ty);
 
         // prio 2: one level zoomed out (plus surroundings)
-        if (layer+1 < VectorMapRenderer.TILE_SHIFTS.length) {
-            int p1x0 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[0] >> VectorMapRenderer.TILE_SHIFTS[layer + 1];
-            int p1y0 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[1] >> VectorMapRenderer.TILE_SHIFTS[layer + 1];
-            int p1x1 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[2] >> VectorMapRenderer.TILE_SHIFTS[layer + 1];
-            int p1y1 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[3] >> VectorMapRenderer.TILE_SHIFTS[layer + 1];
+        if (layer+1 < ChoreographerRenderThread.TILE_SHIFTS.length) {
+            int p1x0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> ChoreographerRenderThread.TILE_SHIFTS[layer + 1];
+            int p1y0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> ChoreographerRenderThread.TILE_SHIFTS[layer + 1];
+            int p1x1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> ChoreographerRenderThread.TILE_SHIFTS[layer + 1];
+            int p1y1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> ChoreographerRenderThread.TILE_SHIFTS[layer + 1];
 
             for (int ty = p1y0-1; ty <= p1y1+1; ++ty)
                 for (int tx = p1x0-1; tx <= p1x1+1; ++tx)
-                    tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer + 1, tx, ty);
+                    tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer + 1, tx, ty);
         }
 
         // prio 3: regular zoom level, just outside screen
         for (int tx = tx0-1; tx <= tx1+1; ++tx) {
-            tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx, ty0 - 1);
-            tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx, ty1 + 1);
+            tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx, ty0 - 1);
+            tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx, ty1 + 1);
         }
         for (int ty = ty0; ty <= ty1; ++ty) {
-            tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx0 - 1, ty);
-            tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer, tx1 + 1, ty);
+            tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx0 - 1, ty);
+            tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx1 + 1, ty);
         }
 
         // prio 4: one level zoomed in
         if (layer-1 >= 0) {
-            int m1x0 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[0] >> VectorMapRenderer.TILE_SHIFTS[layer - 1];
-            int m1y0 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[1] >> VectorMapRenderer.TILE_SHIFTS[layer - 1];
-            int m1x1 = VectorMapRenderer.GLOBAL_OFS_X + screenEdges[2] >> VectorMapRenderer.TILE_SHIFTS[layer - 1];
-            int m1y1 = VectorMapRenderer.GLOBAL_OFS_Y + screenEdges[3] >> VectorMapRenderer.TILE_SHIFTS[layer - 1];
+            int m1x0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> ChoreographerRenderThread.TILE_SHIFTS[layer - 1];
+            int m1y0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> ChoreographerRenderThread.TILE_SHIFTS[layer - 1];
+            int m1x1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> ChoreographerRenderThread.TILE_SHIFTS[layer - 1];
+            int m1y1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> ChoreographerRenderThread.TILE_SHIFTS[layer - 1];
 
             for (int ty = m1y0; ty <= m1y1; ++ty)
                 for (int tx = m1x0; tx <= m1x1; ++tx)
-                    tilesToLoad[tilesToLoadCount++] = VectorMapRenderer.getTilePos(layer - 1, tx, ty);
+                    tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer - 1, tx, ty);
         }
     }
 
@@ -173,7 +173,7 @@ public class TileCache {
         Arrays.sort(tilesToLoadSorted, 0, tilesToLoadCount);
         for (Map.Entry<Integer, Tile> entry : cache.entrySet()) {
             Tile tile = entry.getValue();
-            if (tile.size < VectorMapRenderer.TILE_SHIFTS.length - 1 && // never delete most zoomed out layer
+            if (tile.size < ChoreographerRenderThread.TILE_SHIFTS.length - 1 && // never delete most zoomed out layer
                     Arrays.binarySearch(tilesToLoadSorted, 0, tilesToLoadCount, entry.getKey()) < 0) { // not present among tiles to load
                 tile.delete();
                 cache.remove(entry.getKey());
