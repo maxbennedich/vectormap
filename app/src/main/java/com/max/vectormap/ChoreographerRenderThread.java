@@ -38,8 +38,6 @@ public class ChoreographerRenderThread extends Thread {
     private volatile SurfaceHolder mSurfaceHolder;  // contents may be updated by UI thread
     private EglCore mEglCore;
     private WindowSurface mWindowSurface;
-    private Texture2dProgram mTexProgram;
-    private int mCoarseTexture;
 
     // Previous frame time.
     private long mPrevTimeNanos;
@@ -58,7 +56,19 @@ public class ChoreographerRenderThread extends Thread {
     public static final int GLOBAL_OFS_X = 400000;
     public static final int GLOBAL_OFS_Y = 6200000;
 
-    public float centerUtmX = 400000-GLOBAL_OFS_X, centerUtmY = 6170000-GLOBAL_OFS_Y, scaleFactor = 4096;
+    /**
+     * Used to synchronize access to the global camera position. Direct synchronized access is
+     * used instead of passing messages in order to reduce the overhead and ensure that the
+     * position is updated immediately.
+     */
+    public final Object CAMERA_POSITION_LOCK = new Object();
+
+    public float globalCenterUtmX = 400000-GLOBAL_OFS_X, globalCenterUtmY = 6170000-GLOBAL_OFS_Y;
+    public float globalScaleFactor = 4096;
+
+    // camera position specific to a single frame, instance level to avoid passing around to
+    // all methods using it
+    private float frameCenterUtmX, frameCenterUtmY, frameScaleFactor;
 
     private int glProgram;
 
@@ -185,10 +195,6 @@ public class ChoreographerRenderThread extends Thread {
             mWindowSurface.release();
             mWindowSurface = null;
         }
-        if (mTexProgram != null) {
-            mTexProgram.release();
-            mTexProgram = null;
-        }
         GlUtil.checkGlError("releaseGl done");
 
         mEglCore.makeNothingCurrent();
@@ -215,7 +221,6 @@ public class ChoreographerRenderThread extends Thread {
         }
 
         draw();
-        Log.v("VSYNC", "Swap buffer "+(System.nanoTime()- ChoreographerActivity.T0)/1000000);
         mWindowSurface.swapBuffers();
     }
 
@@ -231,7 +236,7 @@ public class ChoreographerRenderThread extends Thread {
     }
 
     private float getCameraDistance() {
-        return 1000*1024 / scaleFactor;
+        return 1000*1024 / frameScaleFactor;
     }
 
     public static final int getTilePos(int layer, int tx, int ty) {
@@ -247,10 +252,10 @@ public class ChoreographerRenderThread extends Thread {
     /** x0, y0, x1, y1 */
     private void getScreenEdges(int[] screenEdges) {
         float f = getCameraDistance() / nearPlane;
-        screenEdges[0] = (int)(centerUtmX - f * screenRatio + 0.5);
-        screenEdges[1] = (int)(centerUtmY - f + 0.5);
-        screenEdges[2] = (int)(centerUtmX + f * screenRatio + 0.5);
-        screenEdges[3] = (int)(centerUtmY + f + 0.5);
+        screenEdges[0] = (int)(frameCenterUtmX - f * screenRatio + 0.5);
+        screenEdges[1] = (int)(frameCenterUtmY - f + 0.5);
+        screenEdges[2] = (int)(frameCenterUtmX + f * screenRatio + 0.5);
+        screenEdges[3] = (int)(frameCenterUtmY + f + 0.5);
     }
 
     private int[] screenEdges = new int[4];
@@ -302,17 +307,23 @@ public class ChoreographerRenderThread extends Thread {
     private void draw() {
         GlUtil.checkGlError("draw start");
 
+        synchronized (CAMERA_POSITION_LOCK) {
+            frameCenterUtmX = globalCenterUtmX;
+            frameCenterUtmY = globalCenterUtmY;
+            frameScaleFactor = globalScaleFactor;
+        }
+
         startOnDrawNanoTime = System.nanoTime();
 
         // Draw background color
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
-        Matrix.setLookAtM(mViewMatrix, 0, centerUtmX, centerUtmY, getCameraDistance(), centerUtmX, centerUtmY, 0f, 0f, 1.0f, 0.0f);
+        Matrix.setLookAtM(mViewMatrix, 0, frameCenterUtmX, frameCenterUtmY, getCameraDistance(), frameCenterUtmX, frameCenterUtmY, 0f, 0f, 1.0f, 0.0f);
         Matrix.multiplyMM(mMVPMatrix, 0, mProjectionMatrix, 0, mViewMatrix, 0);
         int MVPMatrixHandle = GLES20.glGetUniformLocation(glProgram, "uMVPMatrix");
         GLES20.glUniformMatrix4fv(MVPMatrixHandle, 1, false, mMVPMatrix, 0);
 
-        int layer = scaleFactor > LAYER_SHIFTS[2] ? 0 : (scaleFactor > LAYER_SHIFTS[1] ? 1 : (scaleFactor > LAYER_SHIFTS[0] ? 2 : 3));
+        int layer = frameScaleFactor > LAYER_SHIFTS[2] ? 0 : (frameScaleFactor > LAYER_SHIFTS[1] ? 1 : (frameScaleFactor > LAYER_SHIFTS[0] ? 2 : 3));
 
         getScreenEdges(screenEdges);
 
@@ -325,7 +336,7 @@ public class ChoreographerRenderThread extends Thread {
         Log.v("TileCache", String.format("GPUx: %.0f kb", Tile.gpuBytes / 1024.0));
 //        Log.v("TileCache", "Free vertex/index buffers: " + Tile.getFreeVertexBufferCount() + " / " + Tile.getFreeIndexBufferCount());
 
-        tileCache.refreshForPosition(screenEdges, scaleFactor);
+        tileCache.refreshForPosition(screenEdges, frameScaleFactor);
 
         Tile.trisDrawn = 0;
 //        for (int tp : tileCache.existingTiles) {
@@ -385,7 +396,7 @@ public class ChoreographerRenderThread extends Thread {
 
                     // optional blending layer
                     if (layer < TILE_SHIFTS.length - 1) {
-                        float blend = 2 - scaleFactor / LAYER_SHIFTS[LAYER_SHIFTS.length-1-layer];
+                        float blend = 2 - frameScaleFactor / LAYER_SHIFTS[LAYER_SHIFTS.length-1-layer];
                         if (blend > 0) {
                             GLES20.glEnable(GLES20.GL_BLEND);
                             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);

@@ -25,7 +25,7 @@ public class RenderHandler extends Handler {
 
     /** Call from render thread. */
     public RenderHandler(ChoreographerRenderThread rt) {
-        mWeakRenderThread = new WeakReference<ChoreographerRenderThread>(rt);
+        mWeakRenderThread = new WeakReference<>(rt);
     }
 
     /** Sends the "surface created" message. */

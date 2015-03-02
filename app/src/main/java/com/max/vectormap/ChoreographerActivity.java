@@ -17,7 +17,7 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        Log.d(TAG, "HardwareScalerActivity: onCreate");
+        Log.d(TAG, "ChoreographerActivity: onCreate");
 
         Common.logAvailableMemory(this);
 
@@ -58,7 +58,7 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
 
         SurfaceView sv = (SurfaceView) findViewById(R.id.surfaceView);
         mRenderThread = new ChoreographerRenderThread(sv.getHolder(), this);
-        mRenderThread.setName("HardwareScaler GL render");
+        mRenderThread.setName("VectorMap GL render");
         mRenderThread.start();
         mRenderThread.waitUntilReady();
 
@@ -126,16 +126,9 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
 
     float screenMidX, screenMidY;
 
-    private float mPreviousX;
-    private float mPreviousY;
-
-    private long lastNano = System.nanoTime();
-
-    static long T0 = System.nanoTime();
-
     final float pixelToUtm(float pixel) {
         // using camera
-        return pixel * 1e5f / mRenderThread.scaleFactor;
+        return pixel * 1e5f / mRenderThread.globalScaleFactor;
     }
 
     enum ActionMode { NONE, PAN, ZOOM }
@@ -156,10 +149,13 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
                 if (actionMode == ActionMode.PAN) {
                     float dx = event.getX() - panPrevX;
                     float dy = event.getY() - panPrevY;
-                    mRenderThread.centerUtmX -= pixelToUtm(dx);
-                    mRenderThread.centerUtmY += pixelToUtm(dy);
                     panPrevX = event.getX();
                     panPrevY = event.getY();
+
+                    synchronized (mRenderThread.CAMERA_POSITION_LOCK) {
+                        mRenderThread.globalCenterUtmX -= pixelToUtm(dx);
+                        mRenderThread.globalCenterUtmY += pixelToUtm(dy);
+                    }
 
 //                    mapCenterUpdated();
 
@@ -191,15 +187,6 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
 //        centerUtmY = Math.max(MapConstants.UTM_EXTREME_Y0 + utmMidY, Math.min(MapConstants.UTM_EXTREME_Y1 - utmMidY, centerUtmY));
 //    }
 
-    /** Ensure scale factor is valid and update all scale factor related variables. */
-    private void scaleFactorUpdated() {
-        mRenderThread.scaleFactor = Math.max(1, Math.min(64*65536, mRenderThread.scaleFactor));
-
-//        zoomLevel = 31 - Integer.numberOfLeadingZeros((int)(scaleFactor+(1e-12)));
-//        zoomLevel = Math.max(MIN_ZOOM_LEVEL, Math.min(MAX_ZOOM_LEVEL, zoomLevel));
-//        scalingZoom = scaleFactor / (1 << zoomLevel);
-    }
-
     private class ScaleListener extends ScaleGestureDetector.SimpleOnScaleGestureListener {
         float prevFocusX, prevFocusY;
 
@@ -212,18 +199,21 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
 
         @Override
         public boolean onScale(ScaleGestureDetector detector) {
-            float oldScaleFactor = mRenderThread.scaleFactor;
-
-            mRenderThread.scaleFactor *= detector.getScaleFactor();
-            scaleFactorUpdated();
-
-            // translate due to focus point moving and zoom due to pinch
             float focusX = detector.getFocusX(), focusY = detector.getFocusY();
-            float omScale = 1 - mRenderThread.scaleFactor / oldScaleFactor;
-            mRenderThread.centerUtmX += pixelToUtm((screenMidX - focusX) * omScale - focusX + prevFocusX);
-            mRenderThread.centerUtmY -= pixelToUtm((screenMidY - focusY) * omScale - focusY + prevFocusY);
 
-//            mapCenterUpdated();
+            synchronized (mRenderThread.CAMERA_POSITION_LOCK) {
+                float oldScaleFactor = mRenderThread.globalScaleFactor;
+
+                mRenderThread.globalScaleFactor *= detector.getScaleFactor();
+                mRenderThread.globalScaleFactor = Math.max(1, Math.min(64 * 65536, mRenderThread.globalScaleFactor));
+
+                // translate due to focus point moving and zoom due to pinch
+                float omScale = 1 - mRenderThread.globalScaleFactor / oldScaleFactor;
+                mRenderThread.globalCenterUtmX += pixelToUtm((screenMidX - focusX) * omScale - focusX + prevFocusX);
+                mRenderThread.globalCenterUtmY -= pixelToUtm((screenMidY - focusY) * omScale - focusY + prevFocusY);
+
+//             mapCenterUpdated();
+            }
 
             prevFocusX = focusX;
             prevFocusY = focusY;

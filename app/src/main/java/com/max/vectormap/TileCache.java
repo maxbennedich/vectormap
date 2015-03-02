@@ -21,12 +21,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * TODO: This class submits asynchronous jobs to load tiles from disk, but the deletion and loading
- * TODO: into GL is not asynchronous, but rather done on each frame update. If frame updates are
- * TODO: not frequent enough (e.g. if they only happen when the user moves), a large number of tiles
- * TODO: may be loaded into memory and kept there.
- */
 public class TileCache {
 
     Map<Integer, Tile> cache = new ConcurrentHashMap<>();
