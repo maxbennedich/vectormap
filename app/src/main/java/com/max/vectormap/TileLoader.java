@@ -1,17 +1,18 @@
 package com.max.vectormap;
 
 import android.content.Context;
+import android.os.Environment;
 import android.util.Log;
 import android.util.Pair;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
-import java.io.FilterInputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /** This class deals with loading tiles from disk. Instances of this class are NOT thread safe. */
@@ -94,20 +95,25 @@ public class TileLoader {
         }
     }
 
+    public static File getTriRoot() {
+        return new File(Environment.getExternalStorageDirectory().getAbsolutePath(), "tris");
+    }
+
     /** Never returns null. */
     public Tile loadTile(int tp) {
         int layer = ChoreographerRenderThread.getLayer(tp);
         int tx = ChoreographerRenderThread.getTX(tp), ty = ChoreographerRenderThread.getTY(tp);
-        int size = layer == 0 ? 8192 : (layer == 1 ? 32768 : (layer == 2 ? 131072 : (layer == 3 ? 524288 : -1)));
+        int size = Constants.TILE_SIZES[layer];
 
-        String tileName = "tris/tri_" + size + "_" + tx + "_" + ty + ".tri";
+        int level0 = ty%10, level1 = (ty/10)%10;
+        String tileName = "tri_" + size + "_" + tx + "_" + ty + ".tri";
+        File tileFile = new File(getTriRoot(), level0 + File.separator + level1 + File.separator + tileName);
 
-        try (DataInputStream dis = new DataInputStream(new CustomBufferInputStream(context.getAssets().open(tileName), assetBuffer))) {
-//            try (DataInputStream dis = new DataInputStream(new BufferedInputStream(context.getAssets().open(tileName), 65536))) {
+        try (DataInputStream dis = new DataInputStream(new CustomBufferInputStream(new FileInputStream(tileFile), assetBuffer))) {
             // per tile header data
             int vertexCount = dis.readInt();
             if (vertexCount > MAX_VERTEX_COUNT)
-                throw new IllegalStateException("Max vertex count is " + MAX_VERTEX_COUNT + ", got " + vertexCount);
+                throw new IllegalStateException("Max vertex count is " + MAX_VERTEX_COUNT + ", got " + vertexCount + " for " + tileName);
 
             tx = dis.readInt();
             ty = dis.readInt();
@@ -191,7 +197,7 @@ public class TileLoader {
 
             // un-quantize vertices
             int ofsx = tx*size, ofsy = ty*size;
-            int QUANT_BITS = 13;
+            int QUANT_BITS = 12;
             for (int k = 0; k < vertexCount; ++k) {
                 // TODO could be solved by shifting and adding to speed things up
                 double qpx = newOrder[k] & ((1<<QUANT_BITS)-1);

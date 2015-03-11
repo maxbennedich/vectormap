@@ -2,22 +2,18 @@ package com.max.vectormap;
 
 import android.content.Context;
 import android.content.res.AssetManager;
+import android.os.Environment;
 import android.util.Log;
 
+import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -47,23 +43,26 @@ public class TileCache {
     private void inventoryTris() {
         Pattern p = Pattern.compile("tri_(\\d+)_(\\d+)_(\\d+)\\.tri");
 
-        AssetManager manager = context.getAssets();
-        String[] assets;
-        try {
-            assets = manager.list("tris");
-        } catch (IOException e) {
-            throw new IllegalStateException("Error loading assets", e);
-        }
-
-        for (String asset : assets) {
-            Matcher m = p.matcher(asset);
-            if (m.find()) {
-                int size = Integer.valueOf(m.group(1));
-                int layer = size == 8192 ? 0 : (size == 32768 ? 1 : (size == 131072 ? 2 : (size == 524288 ? 3 : -1)));
-                int tx = Integer.valueOf(m.group(2));
-                int ty = Integer.valueOf(m.group(3));
-                int tilePos = ChoreographerRenderThread.getTilePos(layer, tx, ty);
-                existingTiles.add(tilePos);
+        Log.d("TileCache", "Root = "+TileLoader.getTriRoot());
+        for (File level0 : TileLoader.getTriRoot().listFiles()) {
+            for (File level1 : level0.listFiles()) {
+                for (String tileFile : level1.list()) {
+                    Matcher m = p.matcher(tileFile);
+                    if (m.find()) {
+                        int size = Integer.valueOf(m.group(1));
+                        int layer = -1;
+                        for (int k = 0; k < Constants.TILE_SIZES.length; ++k) {
+                            if (size == Constants.TILE_SIZES[k]) {
+                                layer = k;
+                                break;
+                            }
+                        }
+                        int tx = Integer.valueOf(m.group(2));
+                        int ty = Integer.valueOf(m.group(3));
+                        int tilePos = ChoreographerRenderThread.getTilePos(layer, tx, ty);
+                        existingTiles.add(tilePos);
+                    }
+                }
             }
         }
     }
@@ -81,15 +80,15 @@ public class TileCache {
             synchronized (this) {
                 if ((tile = cache.get(tilePos)) == null) { // test again in case another thread just populated it
                     cache.put(tilePos, tile = tileLoader.loadTile(tilePos));
-                    Log.d("TileCache", (logCacheMiss ? "CACHE MISS: " : "") + "Loaded tile " + ChoreographerRenderThread.getTilePos(tile.size, tile.tx, tile.ty));
+                    Log.d("TileCache", (logCacheMiss ? "CACHE MISS: " : "(no miss) ") + "Loaded tile " + ChoreographerRenderThread.getTilePos(tile.size, tile.tx, tile.ty));
                 }
             }
         }
         return tile;
     }
 
-    private int[] tilesToLoadSorted = new int[256];
-    private int[] tilesToLoad = new int[256];
+    private int[] tilesToLoadSorted = new int[512];
+    private int[] tilesToLoad = new int[512];
     int tilesToLoadCount = 0;
 
     private int layerOld = -1;
@@ -98,17 +97,21 @@ public class TileCache {
     /**
      * Based on camera position and potentially other factors, figure out which tiles are either
      * needed right away or could be needed within short (e.g. if user pans or zooms).
+     * TODO this creates too many tiles when zoomed out too much
+     * TODO BUG: when switching layers, need to load tiles for both layers, also when zooming
+     * TODO: out too quickly, it ends up wanting to load way too many tiles
      */
-    public void refreshForPosition(int[] screenEdges, float scaleFactor) {
+    public void refreshForPosition(int[] screenEdges, float scaleFactor, int layer) {
         // first figure out if potential set of tiles to load changed from previous frame
         boolean setChanged = true;
 
-        int layer = scaleFactor > ChoreographerRenderThread.LAYER_SHIFTS[2] ? 0 : (scaleFactor > ChoreographerRenderThread.LAYER_SHIFTS[1] ? 1 : (scaleFactor > ChoreographerRenderThread.LAYER_SHIFTS[0] ? 2 : 3));
+ //       int layer = Common.getLayerForScaleFactor(scaleFactor);
+
         int lm1 = Math.max(layer - 1, 0);
-        int m1x0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> ChoreographerRenderThread.TILE_SHIFTS[lm1];
-        int m1y0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> ChoreographerRenderThread.TILE_SHIFTS[lm1];
-        int m1x1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> ChoreographerRenderThread.TILE_SHIFTS[lm1];
-        int m1y1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> ChoreographerRenderThread.TILE_SHIFTS[lm1];
+        int m1x0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> Constants.TILE_SHIFTS[lm1];
+        int m1y0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> Constants.TILE_SHIFTS[lm1];
+        int m1x1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> Constants.TILE_SHIFTS[lm1];
+        int m1y1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> Constants.TILE_SHIFTS[lm1];
 
         if (layer == layerOld && m1x0 == m1x0Old && m1y0 == m1y0Old && m1x1 == m1x1Old && m1y1 == m1y1Old) {
             setChanged = false;
@@ -127,20 +130,14 @@ public class TileCache {
         // prio 1: tiles on screen
         int tx0, ty0, tx1, ty1;
         if (layer == 0) { tx0 = m1x0; ty0 = m1y0; tx1 = m1x1; ty1 = m1y1; }
-        else { tx0 = m1x0>>2; ty0 = m1y0>>2; tx1 = m1x1>>2; ty1 = m1y1>>2; }
+        else { tx0 = m1x0>>Constants.TILE_SHIFT_DIFFS[lm1]; ty0 = m1y0>>Constants.TILE_SHIFT_DIFFS[lm1]; tx1 = m1x1>>Constants.TILE_SHIFT_DIFFS[lm1]; ty1 = m1y1>>Constants.TILE_SHIFT_DIFFS[lm1]; }
 
         for (int ty = ty0; ty <= ty1; ++ty)
             for (int tx = tx0; tx <= tx1; ++tx)
                 tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx, ty);
 
-        // prio 2: one level zoomed out (plus surroundings)
-        if (layer+1 < ChoreographerRenderThread.TILE_SHIFTS.length) {
-            for (int ty = (ty0>>2)-1; ty <= (ty1>>2)+1; ++ty)
-                for (int tx = (tx0>>2)-1; tx <= (tx1>>2)+1; ++tx)
-                    tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer + 1, tx, ty);
-        }
-
-        // prio 3: regular zoom level, just outside screen
+        // prio 2: regular zoom level, just outside screen
+        int tc = tilesToLoadCount;
         for (int tx = tx0-1; tx <= tx1+1; ++tx) {
             tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx, ty0 - 1);
             tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx, ty1 + 1);
@@ -148,6 +145,13 @@ public class TileCache {
         for (int ty = ty0; ty <= ty1; ++ty) {
             tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx0 - 1, ty);
             tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx1 + 1, ty);
+        }
+
+        // prio 3: one level zoomed out (plus surroundings) TODO prio 2, and show if zoomed in not loaded?
+        if (layer+1 < Constants.TILE_SHIFTS.length) {
+            for (int ty = (ty0>>Constants.TILE_SHIFT_DIFFS[layer])-1; ty <= (ty1>>Constants.TILE_SHIFT_DIFFS[layer])+1; ++ty)
+                for (int tx = (tx0>>Constants.TILE_SHIFT_DIFFS[layer])-1; tx <= (tx1>>Constants.TILE_SHIFT_DIFFS[layer])+1; ++tx)
+                    tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer + 1, tx, ty);
         }
 
         // prio 4: one level zoomed in
@@ -183,7 +187,7 @@ public class TileCache {
         Arrays.sort(tilesToLoadSorted, 0, tilesToLoadCount);
         for (Map.Entry<Integer, Tile> entry : cache.entrySet()) {
             Tile tile = entry.getValue();
-            if (tile.size < ChoreographerRenderThread.TILE_SHIFTS.length - 1 && // never delete most zoomed out layer
+            if (tile.size < Constants.TILE_SHIFTS.length - 1 && // never delete most zoomed out layer
                     Arrays.binarySearch(tilesToLoadSorted, 0, tilesToLoadCount, entry.getKey()) < 0) { // not present among tiles to load
                 tile.delete();
                 cache.remove(entry.getKey());

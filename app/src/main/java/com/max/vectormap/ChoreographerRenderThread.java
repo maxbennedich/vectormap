@@ -66,8 +66,15 @@ public class ChoreographerRenderThread extends Thread {
     public float globalCenterUtmX = 400000-GLOBAL_OFS_X, globalCenterUtmY = 6170000-GLOBAL_OFS_Y;
     public float globalScaleFactor = 4096;
 
-    // camera position specific to a single frame, instance level to avoid passing around to
-    // all methods using it
+    /**
+     * Used to blend from one layer to the next. For example, if this starts out at 2, and the
+     * user zooms out to layer 3, this number will be increased gradually each frame update
+     * until it reaches 3, and layers will be blended accordingly.
+     */
+    public float blendLayer = Common.getLayerForScaleFactor(globalScaleFactor);
+
+    // camera position specific to a single frame (thread safe), instance level to avoid passing
+    // around to all methods using it
     private float frameCenterUtmX, frameCenterUtmY, frameScaleFactor;
 
     private int glProgram;
@@ -149,7 +156,8 @@ public class ChoreographerRenderThread extends Thread {
         mWindowSurface = new WindowSurface(mEglCore, surface, false);
         mWindowSurface.makeCurrent();
 
-        GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        float[] water = Common.rgb(Constants.COLORS_NEW[0]);
+        GLES20.glClearColor(water[0], water[1], water[2], 1.0f);
 
         GLES20.glDisable(GLES20.GL_CULL_FACE);
         GLES20.glDisable(GLES20.GL_DEPTH_TEST);
@@ -205,14 +213,19 @@ public class ChoreographerRenderThread extends Thread {
 
     /** Handles the frame update.  Runs when Choreographer signals. */
     void doFrame(long timeStampNanos) {
+        synchronized (CAMERA_POSITION_LOCK) {
+            frameCenterUtmX = globalCenterUtmX;
+            frameCenterUtmY = globalCenterUtmY;
+            frameScaleFactor = globalScaleFactor;
+        }
+
+        update(timeStampNanos);
+
         // If we're not keeping up 60fps -- maybe something in the system is busy, maybe
         // recording is too expensive, maybe the CPU frequency governor thinks we're
         // not doing and wants to drop the clock frequencies -- we need to drop frames
         // to catch up.  The "timeStampNanos" value is based on the system monotonic
         // clock, as is System.nanoTime(), so we can compare the values directly.
-
-        update(timeStampNanos);
-
         long diff = (System.nanoTime() - timeStampNanos) / 1000000;
         if (diff > 15) {
             // too much, drop a frame
@@ -260,9 +273,6 @@ public class ChoreographerRenderThread extends Thread {
 
     private int[] screenEdges = new int[4];
 
-    public static final int[] TILE_SHIFTS = {13, 15, 17, 19};
-    public static final float[] LAYER_SHIFTS = {2048, 4096, 16384};
-
     /**
      * Advances animation state.
      * <p/>
@@ -278,33 +288,30 @@ public class ChoreographerRenderThread extends Thread {
         } else {
             intervalNanos = timeStampNanos - mPrevTimeNanos;
 
-            final long ONE_SECOND_NANOS = 1000000000L;
-            if (intervalNanos > ONE_SECOND_NANOS) {
+            if (intervalNanos > Constants.ONE_SECOND_NANOS) {
                 // A gap this big should only happen if something paused us.  We can
                 // either cap the delta at one second, or just pretend like this is
                 // the first frame and not advance at all.
                 Log.d(ChoreographerActivity.TAG, "Time delta too large: " +
-                        (double) intervalNanos / ONE_SECOND_NANOS + " sec");
+                        (double) intervalNanos / Constants.ONE_SECOND_NANOS + " sec");
                 intervalNanos = 0;
             }
         }
         mPrevTimeNanos = timeStampNanos;
 
-        final float ONE_BILLION_F = 1000000000.0f;
-        final float elapsedSeconds = intervalNanos / ONE_BILLION_F;
+        float elapsedSeconds = intervalNanos / 1000000000.0f;
 
-        // TODO any updates here using 'elapsedSeconds'
+        // update layer blending
+        float currentLayer = Common.getLayerForScaleFactor(frameScaleFactor);
+        if (currentLayer > blendLayer)
+            blendLayer = Math.min(currentLayer, blendLayer + elapsedSeconds);
+        else if (currentLayer < blendLayer)
+            blendLayer = Math.max(currentLayer, blendLayer - elapsedSeconds);
     }
 
     /** Draws the scene. */
     private void draw() {
         GlUtil.checkGlError("draw start");
-
-        synchronized (CAMERA_POSITION_LOCK) {
-            frameCenterUtmX = globalCenterUtmX;
-            frameCenterUtmY = globalCenterUtmY;
-            frameScaleFactor = globalScaleFactor;
-        }
 
         startOnDrawNanoTime = System.nanoTime();
 
@@ -316,20 +323,20 @@ public class ChoreographerRenderThread extends Thread {
         int MVPMatrixHandle = GLES20.glGetUniformLocation(glProgram, "uMVPMatrix");
         GLES20.glUniformMatrix4fv(MVPMatrixHandle, 1, false, mMVPMatrix, 0);
 
-        int layer = frameScaleFactor > LAYER_SHIFTS[2] ? 0 : (frameScaleFactor > LAYER_SHIFTS[1] ? 1 : (frameScaleFactor > LAYER_SHIFTS[0] ? 2 : 3));
+        int layer = (int)Math.floor(blendLayer);
 
         getScreenEdges(screenEdges);
 
-        int tx0 = GLOBAL_OFS_X + screenEdges[0] >> TILE_SHIFTS[layer];
-        int ty0 = GLOBAL_OFS_Y + screenEdges[1] >> TILE_SHIFTS[layer];
-        int tx1 = GLOBAL_OFS_X + screenEdges[2] >> TILE_SHIFTS[layer];
-        int ty1 = GLOBAL_OFS_Y + screenEdges[3] >> TILE_SHIFTS[layer];
+        int tx0 = GLOBAL_OFS_X + screenEdges[0] >> Constants.TILE_SHIFTS[layer];
+        int ty0 = GLOBAL_OFS_Y + screenEdges[1] >> Constants.TILE_SHIFTS[layer];
+        int tx1 = GLOBAL_OFS_X + screenEdges[2] >> Constants.TILE_SHIFTS[layer];
+        int ty1 = GLOBAL_OFS_Y + screenEdges[3] >> Constants.TILE_SHIFTS[layer];
 
 //        Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
 //        Log.v("TileCache", String.format("GPUx: %.0f kb", Tile.gpuBytes / 1024.0));
 //        Log.v("TileCache", "Free vertex/index buffers: " + Tile.getFreeVertexBufferCount() + " / " + Tile.getFreeIndexBufferCount());
 
-        tileCache.refreshForPosition(screenEdges, frameScaleFactor);
+        tileCache.refreshForPosition(screenEdges, frameScaleFactor, layer);
 
         Tile.trisDrawn = 0;
 //        for (int tp : tileCache.existingTiles) {
@@ -343,23 +350,24 @@ public class ChoreographerRenderThread extends Thread {
         // inner (zoomed in) tiles are loaded. If not, fall back to rendering the zoomed out tile
         // (to avoid freezing the app while loading tiles from disk). This also allows us to blend
         // two neighboring tile layers easily.
-        int tx0p1 = tx0 >> 2, ty0p1 = ty0 >> 2, tx1p1 = tx1 >> 2, ty1p1 = ty1 >> 2;
+        int shift = Constants.TILE_SHIFT_DIFFS[layer];
+        int tx0p1 = tx0 >> shift, ty0p1 = ty0 >> shift, tx1p1 = tx1 >> shift, ty1p1 = ty1 >> shift;
         for (int typ1 = ty0p1; typ1 <= ty1p1; ++typ1) {
             for (int txp1 = tx0p1; txp1 <= tx1p1; ++txp1) {
                 boolean useOuterTile = false;
                 int zoomedOutTilePos = getTilePos(layer + 1, txp1, typ1);
 
-                if (layer+1 < TILE_SHIFTS.length) {
+                if (layer+1 < Constants.TILE_SHIFTS.length) {
                     // If the zoomed out tile is loaded, use it if at least 1 zoomed in tile is
                     // not loaded. Otherwise, use it if at least 2 zoomed in tiles are not loaded.
                     // (Since we have to load the zoomed out tile anyway.)
                     int minTilesNotLoaded = tileCache.cache.containsKey(zoomedOutTilePos) ? 1 : 2;
                     int tilesNotLoaded = 0;
 
-                    // loop over all (max 16) tiles in the outer tile and see if they're loaded
+                    // loop over all (max 16 for shift diff 2) tiles in the outer tile and see if they're loaded
                     innerTilesLoop:
-                    for (int ty = Math.max(ty0, typ1 << 2); ty <= Math.min(ty1, (typ1 << 2) + 3); ++ty) {
-                        for (int tx = Math.max(tx0, txp1 << 2); tx <= Math.min(tx1, (txp1 << 2) + 3); ++tx) {
+                    for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {
+                        for (int tx = Math.max(tx0, txp1 << shift); tx <= Math.min(tx1, (txp1 + 1 << shift) - 1); ++tx) {
                             int tp = getTilePos(layer, tx, ty);
                             if (tileCache.existingTiles.contains(tp) && !tileCache.cache.containsKey(tp)) {
                                 if (++tilesNotLoaded == minTilesNotLoaded) {
@@ -371,6 +379,8 @@ public class ChoreographerRenderThread extends Thread {
                     }
                 }
 
+                useOuterTile = false; // TODO for testing only
+
                 // draw tiles
                 if (useOuterTile) {
                     Tile tile = tileCache.get(zoomedOutTilePos, true);
@@ -378,8 +388,8 @@ public class ChoreographerRenderThread extends Thread {
                         tile.draw(glProgram, 1.0f);
                 } else {
                     // always draw zoomed in tiles first and without blending
-                    for (int ty = Math.max(ty0, typ1 << 2); ty <= Math.min(ty1, (typ1 << 2) + 3); ++ty) {
-                        for (int tx = Math.max(tx0, txp1 << 2); tx <= Math.min(tx1, (txp1 << 2) + 3); ++tx) {
+                    for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {
+                        for (int tx = Math.max(tx0, txp1 << shift); tx <= Math.min(tx1, (txp1 + 1 << shift) - 1); ++tx) {
                             int tp = getTilePos(layer, tx, ty);
                             Tile tile = tileCache.get(tp, true);
                             if (tile != null)
@@ -387,9 +397,9 @@ public class ChoreographerRenderThread extends Thread {
                         }
                     }
 
-                    // optional blending layer
-                    if (layer < TILE_SHIFTS.length - 1) {
-                        float blend = 2 - frameScaleFactor / LAYER_SHIFTS[LAYER_SHIFTS.length-1-layer];
+                    // optional blending layer (zoomed out)
+                    if (layer < Constants.TILE_SHIFTS.length - 1) {
+                        float blend = blendLayer - layer;
                         if (blend > 0) {
                             GLES20.glEnable(GLES20.GL_BLEND);
                             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
@@ -397,6 +407,8 @@ public class ChoreographerRenderThread extends Thread {
                             if (tile != null)
                                 tile.draw(glProgram, blend);
                             GLES20.glDisable(GLES20.GL_BLEND);
+                        } else if (blend < 0) {
+                            throw new IllegalStateException("Unexpected blend: "+blend);
                         }
                     }
                 }
@@ -405,7 +417,7 @@ public class ChoreographerRenderThread extends Thread {
 
 //        tileCache.get(738032, true).draw(glProgram, 1.0f); // for debugging
 
-        logFPS();
+//        logFPS();
 
         GlUtil.checkGlError("draw done");
     }

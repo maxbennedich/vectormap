@@ -207,7 +207,7 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
                 float oldScaleFactor = mRenderThread.globalScaleFactor;
 
                 mRenderThread.globalScaleFactor *= detector.getScaleFactor();
-                mRenderThread.globalScaleFactor = Math.max(1, Math.min(64 * 65536, mRenderThread.globalScaleFactor));
+                mRenderThread.globalScaleFactor = Math.max(Constants.MIN_ZOOM, Math.min(Constants.MAX_ZOOM, mRenderThread.globalScaleFactor));
 
                 // translate due to focus point moving and zoom due to pinch
                 float omScale = 1 - mRenderThread.globalScaleFactor / oldScaleFactor;

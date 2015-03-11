@@ -38,10 +38,6 @@ public class Tile {
 
     private static final int COORDS_PER_VERTEX = 2;
 
-    private static float[] rgb(int rgb) {
-        return new float[] {(rgb>>16) / 255f, (rgb>>8&0xff) / 255f, (rgb&0xff) / 255f, 0};
-    }
-
     static class ClaimableBuffer<B extends Buffer> {
         B buffer;
         boolean claimed;
@@ -138,7 +134,7 @@ public class Tile {
         for (Map.Entry<Integer, Pair<short[], Integer>> tris : trisByType.entrySet()) {
             indexCount[type] = tris.getValue().second;
 
-            color[type] = rgb(Constants.COLORS_NEW[tris.getKey()]);
+            color[type] = Common.rgb(Constants.COLORS_NEW[tris.getKey()]);
 //          color[0]/=2; color[1]/=2; color[2]/=2; // for testing overdraw
 
             tmpIndexBuffers[type] = getFreeIndexBuffer(indexCount[type]);
