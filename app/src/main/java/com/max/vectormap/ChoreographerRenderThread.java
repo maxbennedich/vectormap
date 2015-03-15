@@ -379,13 +379,29 @@ public class ChoreographerRenderThread extends Thread {
                     }
                 }
 
-                useOuterTile = false; // TODO for testing only
-
                 // draw tiles
                 if (useOuterTile) {
+                    // we don't have all zoomed in tiles loaded, so fall back to zoomed out tile
                     Tile tile = tileCache.get(zoomedOutTilePos, true);
                     if (tile != null)
                         tile.draw(glProgram, 1.0f);
+
+                    // if blending, only draw tiles that are loaded (to avoid stalling pipeline)
+                    float blend = 1 - (blendLayer - layer);
+                    if (blend > 0) {
+                        GLES20.glEnable(GLES20.GL_BLEND);
+                        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+                        for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {
+                            for (int tx = Math.max(tx0, txp1 << shift); tx <= Math.min(tx1, (txp1 + 1 << shift) - 1); ++tx) {
+                                int tp = getTilePos(layer, tx, ty);
+                                if (tileCache.cache.containsKey(tp))
+                                    tileCache.get(tp, true).draw(glProgram, 1.0f);
+                            }
+                        }
+                        GLES20.glDisable(GLES20.GL_BLEND);
+                    } else if (blend < 0) {
+                        throw new IllegalStateException("Unexpected blend: "+blend);
+                    }
                 } else {
                     // always draw zoomed in tiles first and without blending
                     for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {

@@ -55,6 +55,10 @@ public class Common {
         return Constants.LAYER_SHIFTS.length;
     }
 
+    public static String getTilePosStr(int tilePos) {
+        return ChoreographerRenderThread.getLayer(tilePos) + ", " + ChoreographerRenderThread.getTX(tilePos) + ", " + ChoreographerRenderThread.getTY(tilePos);
+    }
+
     public static float[] rgb(int rgb) {
         return new float[] {(rgb>>16) / 255f, (rgb>>8&0xff) / 255f, (rgb&0xff) / 255f, 0};
     }

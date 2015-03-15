@@ -80,7 +80,8 @@ public class TileCache {
             synchronized (this) {
                 if ((tile = cache.get(tilePos)) == null) { // test again in case another thread just populated it
                     cache.put(tilePos, tile = tileLoader.loadTile(tilePos));
-                    Log.d("TileCache", (logCacheMiss ? "CACHE MISS: " : "(no miss) ") + "Loaded tile " + ChoreographerRenderThread.getTilePos(tile.size, tile.tx, tile.ty));
+                    Log.d("TileCache", (logCacheMiss ? "CACHE MISS: " : "(no miss) ") + "Loaded tile " + ChoreographerRenderThread.getTilePos(tile.size, tile.tx, tile.ty) +
+                            " (" + tile.size + ", " + tile.tx + ", " + tile.ty + ")");
                 }
             }
         }
@@ -105,7 +106,7 @@ public class TileCache {
         // first figure out if potential set of tiles to load changed from previous frame
         boolean setChanged = true;
 
- //       int layer = Common.getLayerForScaleFactor(scaleFactor);
+        layer = Common.getLayerForScaleFactor(scaleFactor);
 
         int lm1 = Math.max(layer - 1, 0);
         int m1x0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> Constants.TILE_SHIFTS[lm1];
@@ -161,7 +162,12 @@ public class TileCache {
                     tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer - 1, tx, ty);
         }
 
-        refresh();
+        Log.d("TileCache", "(miss) " + String.format("layer %d: %d,%d-%d,%d, layer %d: %d,%d-%d,%d", layer, tx0, ty0, tx1, ty1, lm1, m1x0, m1y0, m1x1, m1y1));
+        StringBuilder sb = new StringBuilder();
+        for (int k : tilesToLoad) sb.append(k+", ");
+        Log.d("TileCache", "(miss) tiles to load for layer " + layer + ": "+sb);
+
+        refresh(layer);
     }
 
     class TileDiskLoader implements Runnable {
@@ -178,7 +184,7 @@ public class TileCache {
     }
     
     /** Delete unused tiles and start loading new ones into cache (asynchronously). */
-    private void refresh() {
+    private void refresh(int layer) {
         tileDiskLoader.tilesToLoad.clear();
 
         // delete unused tiles from cache, memory and GPU
@@ -189,6 +195,7 @@ public class TileCache {
             Tile tile = entry.getValue();
             if (tile.size < Constants.TILE_SHIFTS.length - 1 && // never delete most zoomed out layer
                     Arrays.binarySearch(tilesToLoadSorted, 0, tilesToLoadCount, entry.getKey()) < 0) { // not present among tiles to load
+                Log.d("TileCache", "Deleting (miss) tile " + entry.getKey() + " (" + Common.getTilePosStr(entry.getKey()) + ")");
                 tile.delete();
                 cache.remove(entry.getKey());
             }
