@@ -9,6 +9,9 @@ public class Constants {
 
     public static final int NR_SURFACE_TYPES = 10;
 
+    public static final int GLOBAL_OFS_X = 400000;
+    public static final int GLOBAL_OFS_Y = 6200000;
+
     public static final float MIN_ZOOM = 128;
     public static final float MAX_ZOOM = 64 * 65536;
 
@@ -18,12 +21,14 @@ public class Constants {
     public static final int[] TILE_SIZES = new int[TILE_SHIFTS.length];
     /** Number of times to shift current tile size left to equal next larger tile size. */
     public static final int[] TILE_SHIFT_DIFFS = new int[TILE_SHIFTS.length];
+    public static final int NR_LAYERS = TILE_SHIFTS.length;
+    public static final int TOP_LAYER = TILE_SHIFTS.length - 1;
 
     static {
-        for (int k = 0; k < TILE_SHIFTS.length; ++k)
+        for (int k = 0; k < NR_LAYERS; ++k)
             TILE_SIZES[k] = 1 << TILE_SHIFTS[k];
-        for (int k = 0; k < TILE_SHIFTS.length; ++k)
-            TILE_SHIFT_DIFFS[k] = k == TILE_SHIFTS.length - 1 ? 0 : TILE_SHIFTS[k + 1] - TILE_SHIFTS[k];
+        for (int k = 0; k < NR_LAYERS; ++k)
+            TILE_SHIFT_DIFFS[k] = k == TOP_LAYER ? 0 : TILE_SHIFTS[k + 1] - TILE_SHIFTS[k];
     }
 
     public static int[] COLORS_DEBUG_INT = {

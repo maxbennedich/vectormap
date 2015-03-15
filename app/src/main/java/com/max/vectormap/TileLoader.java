@@ -101,8 +101,8 @@ public class TileLoader {
 
     /** Never returns null. */
     public Tile loadTile(int tp) {
-        int layer = ChoreographerRenderThread.getLayer(tp);
-        int tx = ChoreographerRenderThread.getTX(tp), ty = ChoreographerRenderThread.getTY(tp);
+        int layer = Common.getLayer(tp);
+        int tx = Common.getTX(tp), ty = Common.getTY(tp);
         int size = Constants.TILE_SIZES[layer];
 
         int level0 = ty%10, level1 = (ty/10)%10;
@@ -204,8 +204,8 @@ public class TileLoader {
                 double qpy = newOrder[k] >> QUANT_BITS;
                 int px = (int)(qpx / ((1<<QUANT_BITS)-1) * size + 0.5);
                 int py = (int)(qpy / ((1<<QUANT_BITS)-1) * size + 0.5);
-                verts[k*2] = px + ofsx - ChoreographerRenderThread.GLOBAL_OFS_X;
-                verts[k*2+1] = py + ofsy - ChoreographerRenderThread.GLOBAL_OFS_Y;
+                verts[k*2] = px + ofsx - Constants.GLOBAL_OFS_X;
+                verts[k*2+1] = py + ofsy - Constants.GLOBAL_OFS_Y;
             }
 
             return new Tile(layer, tx, ty, verts, vertexCount, trisByType);

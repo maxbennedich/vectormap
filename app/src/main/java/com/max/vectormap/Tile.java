@@ -18,6 +18,7 @@ import android.util.Pair;
  */
 public class Tile {
 
+    /** this stores the layer, e.g. 0 for most zoomed in, 1 for one step zoomed out, etc */
     final int size;
     final int tx, ty;
 

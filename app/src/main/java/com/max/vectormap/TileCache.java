@@ -1,14 +1,15 @@
 package com.max.vectormap;
 
 import android.content.Context;
-import android.content.res.AssetManager;
-import android.os.Environment;
 import android.util.Log;
 
 import java.io.File;
-import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
@@ -59,7 +60,7 @@ public class TileCache {
                         }
                         int tx = Integer.valueOf(m.group(2));
                         int ty = Integer.valueOf(m.group(3));
-                        int tilePos = ChoreographerRenderThread.getTilePos(layer, tx, ty);
+                        int tilePos = Common.getTilePos(layer, tx, ty);
                         existingTiles.add(tilePos);
                     }
                 }
@@ -80,12 +81,184 @@ public class TileCache {
             synchronized (this) {
                 if ((tile = cache.get(tilePos)) == null) { // test again in case another thread just populated it
                     cache.put(tilePos, tile = tileLoader.loadTile(tilePos));
-                    Log.d("TileCache", (logCacheMiss ? "CACHE MISS: " : "(no miss) ") + "Loaded tile " + ChoreographerRenderThread.getTilePos(tile.size, tile.tx, tile.ty) +
+                    Log.d("TileCache", (logCacheMiss ? "CACHE MISS: " : "(no miss) ") + "Loaded tile " + Common.getTilePos(tile.size, tile.tx, tile.ty) +
                             " (" + tile.size + ", " + tile.tx + ", " + tile.ty + ")");
                 }
             }
         }
         return tile;
+    }
+
+    Map<Integer, Float> timeFirstDrawn = new HashMap<>();
+    Map<Integer, Float> timeLastDrawn = new HashMap<>();
+
+    private static float getGlobalTimeInSeconds() {
+        return System.nanoTime()/1e9f;
+    }
+
+//    float getTimeFirstDrawn(int tp) {
+//        Float t = timeFirstDrawn.get(tp);
+//        if (t == null)
+//            timeFirstDrawn.put(tp, t = getGlobalTimeInSeconds()); // TODO should subtract frame time!
+//        return t;
+//    }
+
+    public boolean isLoaded(int tp) {
+        return cache.containsKey(tp);
+    }
+
+    private BlendedTile tile(int tp) {
+        float blend;
+        Float lastDrawn = timeLastDrawn.get(tp);
+        if (lastDrawn != null) {
+            // blending out
+            if (timeFirstDrawn.containsKey(tp)) throw new AssertionError("Tile "+Common.getTilePosStr(tp)+" in both first and last drawn!");
+            blend = Math.max(0, 1 - (getGlobalTimeInSeconds() - lastDrawn));
+        } else {
+            // blending in
+            Float firstDrawn = timeFirstDrawn.get(tp);
+            if (firstDrawn == null)
+                timeFirstDrawn.put(tp, firstDrawn = getGlobalTimeInSeconds()); // TODO should subtract frame time!
+            blend = Math.min(1, getGlobalTimeInSeconds() - firstDrawn);
+        }
+        return new BlendedTile(tp, blend);
+    }
+
+    private int[] screenEdges;
+
+    public static void getTileEdges(int[] screenEdges, int layer, int[] tileEdges) {
+        tileEdges[0] = Constants.GLOBAL_OFS_X + screenEdges[0] >> Constants.TILE_SHIFTS[layer];
+        tileEdges[1] = Constants.GLOBAL_OFS_Y + screenEdges[1] >> Constants.TILE_SHIFTS[layer];
+        tileEdges[2] = Constants.GLOBAL_OFS_X + screenEdges[2] >> Constants.TILE_SHIFTS[layer];
+        tileEdges[3] = Constants.GLOBAL_OFS_Y + screenEdges[3] >> Constants.TILE_SHIFTS[layer];
+    }
+
+    /**
+     * NOT THREAD SAFE
+     * @param screenEdges UTM int coordinates
+     */
+    public List<BlendedTile> getDrawOrder(int[] screenEdges, float scaleFactor) {
+        this.screenEdges = screenEdges;
+        int minLayerDrawn = Common.getLayerForScaleFactor(scaleFactor);
+
+        List<BlendedTile> drawOrder = new ArrayList<>();
+        int[] txy = new int[4];
+        getTileEdges(screenEdges, Constants.TOP_LAYER, txy);
+        for (int ty = txy[1]; ty <= txy[3]; ++ty)
+            for (int tx = txy[0]; tx <= txy[2]; ++tx)
+                drawOrder.addAll(addTileRecursive(Common.getTilePos(Constants.TOP_LAYER, tx, ty), minLayerDrawn));
+
+        // move tiles that are no longer drawn from "first drawn" to "last drawn" map TODO optimize
+        Set<Integer> allDrawn = new HashSet<>();
+        for (BlendedTile tile : drawOrder)
+            allDrawn.add(tile.tilePos);
+        for (Iterator<Integer> it = timeFirstDrawn.keySet().iterator(); it.hasNext(); ) {
+            int tp = it.next();
+            if (!allDrawn.contains(tp)) {
+                it.remove();
+//                timeLastDrawn.put(tp, getGlobalTimeInSeconds());
+            }
+        }
+
+        Log.d("DrawOrder", drawOrder.toString());
+
+        return drawOrder;
+    }
+
+    private List<BlendedTile> addTileRecursive(int tp, int minLayerDrawn) {
+        List<BlendedTile> drawOrder = new ArrayList<>();
+
+        for (int child : getChildren(tp))
+            if (positionHasContent(child))
+                drawOrder.addAll(addTileRecursive(child, minLayerDrawn));
+
+        // draw tile if either within the given scale, or it's more zoomed in but still blending out (recently removed)
+        int layer = Common.getLayer(tp);
+        if (isLoaded(tp) && (layer >= minLayerDrawn || blendingOut(tp)))
+            if (!allChildrenCovered(tp, minLayerDrawn) || blendingIn(tp, drawOrder))
+                drawOrder.add(0, tile(tp));
+
+        return drawOrder;
+    }
+
+    /** Whether tile has been removed and is still blending out. */
+    private boolean blendingOut(int tp) {
+        if(true)return false; // TODO
+        Float t = timeLastDrawn.get(tp);
+        if (t == null) return false;
+        if (getGlobalTimeInSeconds() - t >= 1) {
+            timeLastDrawn.remove(tp); // finished blending, remove tile
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * If the given tile is older than any drawn child, we need to draw it even if all children are loaded since
+     * otherwise we'd have "popping" when a child replaces a parent that has not finished blending.
+     */
+    private boolean blendingIn(int tp, List<BlendedTile> drawnChildren) {
+        float minChildBlend = 1;
+        for (BlendedTile child : drawnChildren)
+            minChildBlend = Math.min(minChildBlend, child.blend);
+        Float firstDrawn = timeFirstDrawn.get(tp);
+        if (firstDrawn == null)
+            return false;
+        float parentBlend = Math.min(1, getGlobalTimeInSeconds() - firstDrawn);
+        return parentBlend > minChildBlend;
+    }
+
+    /** @return Whether any part of the tile is on screen. */
+    private boolean onScreen(int tp) {
+        int tx = Common.getTX(tp), ty = Common.getTY(tp);
+        int[] txy = new int[4];
+        getTileEdges(screenEdges, Common.getLayer(tp), txy);
+        return tx >= txy[0] && tx <= txy[2] && ty >= txy[1] && ty <= txy[3];
+    }
+
+    /**
+     * @return Whether the square defined by the tile at the given position is entirely covered,
+     * either by a single tile or multiple tiles (or is off screen).
+     */
+    private boolean positionCovered(int tp, int minLayerDrawn) {
+        return !onScreen(tp) || isLoaded(tp) || allChildrenCovered(tp, minLayerDrawn);
+    }
+
+    private boolean allChildrenCovered(int tp, int minLayerDrawn) {
+        if (Common.getLayer(tp) <= minLayerDrawn)
+            return false;
+        for (int child : getChildren(tp))
+            if (!positionCovered(child, minLayerDrawn))
+                return false;
+        return true;
+    }
+
+    /**
+     * @return Whether the square defined by the tile at the given position has any content at all,
+     * for example entirely filled by a single tile or filled by one or more sub-tiles.
+     */
+    private boolean positionHasContent(int tp) {
+        return isLoaded(tp) || anyChildHasContent(tp);
+    }
+
+    private boolean anyChildHasContent(int tp) {
+        for (int child : getChildren(tp))
+            if (positionHasContent(child))
+                return true;
+        return false;
+    }
+
+    /** All children of the given position, including those off screen. */
+    int[] getChildren(int tp) {
+        int layer = Common.getLayer(tp);
+        if (layer == 0) return new int[0];
+        int shiftDiff = Constants.TILE_SHIFT_DIFFS[layer-1];
+        int x = Common.getTX(tp), y = Common.getTY(tp);
+        int children[] = new int[1 << shiftDiff*2];
+        for (int yi = y << shiftDiff, ci = 0; yi < y+1 << shiftDiff; ++yi)
+            for (int xi = x << shiftDiff; xi < x+1 << shiftDiff; ++xi, ++ci)
+                children[ci] = Common.getTilePos(layer-1, xi, yi);
+        return children;
     }
 
     private int[] tilesToLoadSorted = new int[512];
@@ -109,10 +282,10 @@ public class TileCache {
         layer = Common.getLayerForScaleFactor(scaleFactor);
 
         int lm1 = Math.max(layer - 1, 0);
-        int m1x0 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[0] >> Constants.TILE_SHIFTS[lm1];
-        int m1y0 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[1] >> Constants.TILE_SHIFTS[lm1];
-        int m1x1 = ChoreographerRenderThread.GLOBAL_OFS_X + screenEdges[2] >> Constants.TILE_SHIFTS[lm1];
-        int m1y1 = ChoreographerRenderThread.GLOBAL_OFS_Y + screenEdges[3] >> Constants.TILE_SHIFTS[lm1];
+        int m1x0 = Constants.GLOBAL_OFS_X + screenEdges[0] >> Constants.TILE_SHIFTS[lm1];
+        int m1y0 = Constants.GLOBAL_OFS_Y + screenEdges[1] >> Constants.TILE_SHIFTS[lm1];
+        int m1x1 = Constants.GLOBAL_OFS_X + screenEdges[2] >> Constants.TILE_SHIFTS[lm1];
+        int m1y1 = Constants.GLOBAL_OFS_Y + screenEdges[3] >> Constants.TILE_SHIFTS[lm1];
 
         if (layer == layerOld && m1x0 == m1x0Old && m1y0 == m1y0Old && m1x1 == m1x1Old && m1y1 == m1y1Old) {
             setChanged = false;
@@ -135,31 +308,31 @@ public class TileCache {
 
         for (int ty = ty0; ty <= ty1; ++ty)
             for (int tx = tx0; tx <= tx1; ++tx)
-                tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx, ty);
+                tilesToLoad[tilesToLoadCount++] = Common.getTilePos(layer, tx, ty);
 
         // prio 2: regular zoom level, just outside screen
         int tc = tilesToLoadCount;
         for (int tx = tx0-1; tx <= tx1+1; ++tx) {
-            tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx, ty0 - 1);
-            tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx, ty1 + 1);
+            tilesToLoad[tilesToLoadCount++] = Common.getTilePos(layer, tx, ty0 - 1);
+            tilesToLoad[tilesToLoadCount++] = Common.getTilePos(layer, tx, ty1 + 1);
         }
         for (int ty = ty0; ty <= ty1; ++ty) {
-            tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx0 - 1, ty);
-            tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer, tx1 + 1, ty);
+            tilesToLoad[tilesToLoadCount++] = Common.getTilePos(layer, tx0 - 1, ty);
+            tilesToLoad[tilesToLoadCount++] = Common.getTilePos(layer, tx1 + 1, ty);
         }
 
         // prio 3: one level zoomed out (plus surroundings) TODO prio 2, and show if zoomed in not loaded?
-        if (layer+1 < Constants.TILE_SHIFTS.length) {
+        if (layer+1 < Constants.NR_LAYERS) {
             for (int ty = (ty0>>Constants.TILE_SHIFT_DIFFS[layer])-1; ty <= (ty1>>Constants.TILE_SHIFT_DIFFS[layer])+1; ++ty)
                 for (int tx = (tx0>>Constants.TILE_SHIFT_DIFFS[layer])-1; tx <= (tx1>>Constants.TILE_SHIFT_DIFFS[layer])+1; ++tx)
-                    tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer + 1, tx, ty);
+                    tilesToLoad[tilesToLoadCount++] = Common.getTilePos(layer + 1, tx, ty);
         }
 
         // prio 4: one level zoomed in
         if (layer-1 >= 0) {
             for (int ty = m1y0; ty <= m1y1; ++ty)
                 for (int tx = m1x0; tx <= m1x1; ++tx)
-                    tilesToLoad[tilesToLoadCount++] = ChoreographerRenderThread.getTilePos(layer - 1, tx, ty);
+                    tilesToLoad[tilesToLoadCount++] = Common.getTilePos(layer - 1, tx, ty);
         }
 
         Log.d("TileCache", "(miss) " + String.format("layer %d: %d,%d-%d,%d, layer %d: %d,%d-%d,%d", layer, tx0, ty0, tx1, ty1, lm1, m1x0, m1y0, m1x1, m1y1));
@@ -193,7 +366,7 @@ public class TileCache {
         Arrays.sort(tilesToLoadSorted, 0, tilesToLoadCount);
         for (Map.Entry<Integer, Tile> entry : cache.entrySet()) {
             Tile tile = entry.getValue();
-            if (tile.size < Constants.TILE_SHIFTS.length - 1 && // never delete most zoomed out layer
+            if (tile.size != Constants.TOP_LAYER && // never delete most zoomed out layer
                     Arrays.binarySearch(tilesToLoadSorted, 0, tilesToLoadCount, entry.getKey()) < 0) { // not present among tiles to load
                 Log.d("TileCache", "Deleting (miss) tile " + entry.getKey() + " (" + Common.getTilePosStr(entry.getKey()) + ")");
                 tile.delete();

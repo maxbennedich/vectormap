@@ -16,6 +16,8 @@ import com.max.vectormap.gles.Sprite2d;
 import com.max.vectormap.gles.Texture2dProgram;
 import com.max.vectormap.gles.WindowSurface;
 
+import java.util.List;
+
 /**
  * This class handles all OpenGL rendering.
  * <p>
@@ -53,9 +55,6 @@ public class ChoreographerRenderThread extends Thread {
     private float screenRatio;
     private float nearPlane = 0.01f;
 
-    public static final int GLOBAL_OFS_X = 400000;
-    public static final int GLOBAL_OFS_Y = 6200000;
-
     /**
      * Used to synchronize access to the global camera position. Direct synchronized access is
      * used instead of passing messages in order to reduce the overhead and ensure that the
@@ -63,7 +62,8 @@ public class ChoreographerRenderThread extends Thread {
      */
     public final Object CAMERA_POSITION_LOCK = new Object();
 
-    public float globalCenterUtmX = 400000-GLOBAL_OFS_X, globalCenterUtmY = 6170000-GLOBAL_OFS_Y;
+    public float globalCenterUtmX = 400000 - Constants.GLOBAL_OFS_X;
+    public float globalCenterUtmY = 6170000 - Constants.GLOBAL_OFS_Y;
     public float globalScaleFactor = 4096;
 
     /**
@@ -252,17 +252,7 @@ public class ChoreographerRenderThread extends Thread {
         return 1000*1024 / frameScaleFactor;
     }
 
-    public static final int getTilePos(int layer, int tx, int ty) {
-        // layer: 4 bits (0-15)
-        // tx/ty: 14 bits (0-16383)
-        return (layer << 28) + (tx << 14) + ty;
-    }
-
-    public static final int getLayer(int tilePos) { return tilePos >>> 28; }
-    public static final int getTX(int tilePos) { return (tilePos >> 14) & 0x3fff; }
-    public static final int getTY(int tilePos) { return tilePos & 0x3fff; }
-
-    /** x0, y0, x1, y1 */
+    /** x0, y0, x1, y1 (utm coordinates) */
     private void getScreenEdges(int[] screenEdges) {
         float f = getCameraDistance() / nearPlane;
         screenEdges[0] = (int)(frameCenterUtmX - f * screenRatio + 0.5);
@@ -327,10 +317,10 @@ public class ChoreographerRenderThread extends Thread {
 
         getScreenEdges(screenEdges);
 
-        int tx0 = GLOBAL_OFS_X + screenEdges[0] >> Constants.TILE_SHIFTS[layer];
-        int ty0 = GLOBAL_OFS_Y + screenEdges[1] >> Constants.TILE_SHIFTS[layer];
-        int tx1 = GLOBAL_OFS_X + screenEdges[2] >> Constants.TILE_SHIFTS[layer];
-        int ty1 = GLOBAL_OFS_Y + screenEdges[3] >> Constants.TILE_SHIFTS[layer];
+        int tx0 = Constants.GLOBAL_OFS_X + screenEdges[0] >> Constants.TILE_SHIFTS[layer];
+        int ty0 = Constants.GLOBAL_OFS_Y + screenEdges[1] >> Constants.TILE_SHIFTS[layer];
+        int tx1 = Constants.GLOBAL_OFS_X + screenEdges[2] >> Constants.TILE_SHIFTS[layer];
+        int ty1 = Constants.GLOBAL_OFS_Y + screenEdges[3] >> Constants.TILE_SHIFTS[layer];
 
 //        Log.v("View", "tx="+tx0+"-"+tx1+", ty="+ty0+"-"+ty1+", layer="+layer+", edges=["+(GLOBAL_OFS_X+screenEdges[0])+","+(GLOBAL_OFS_Y+screenEdges[1])+" - "+(GLOBAL_OFS_X+screenEdges[2])+","+(GLOBAL_OFS_Y+screenEdges[3])+"]");
 //        Log.v("TileCache", String.format("GPUx: %.0f kb", Tile.gpuBytes / 1024.0));
@@ -339,6 +329,19 @@ public class ChoreographerRenderThread extends Thread {
         tileCache.refreshForPosition(screenEdges, frameScaleFactor, layer);
 
         Tile.trisDrawn = 0;
+
+        for (BlendedTile blendedTile : tileCache.getDrawOrder(screenEdges, frameScaleFactor)) {
+            if (blendedTile.blend < 1) {
+                GLES20.glEnable(GLES20.GL_BLEND);
+                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+            }
+
+            tileCache.get(blendedTile.tilePos, true).draw(glProgram, blendedTile.blend);
+
+            if (blendedTile.blend < 1)
+                GLES20.glDisable(GLES20.GL_BLEND);
+        }
+
 //        for (int tp : tileCache.existingTiles) {
 //            Tile tile = tileCache.get(tp);
 //            if (tile != null && tile.size == 0)
@@ -346,90 +349,90 @@ public class ChoreographerRenderThread extends Thread {
 //        }
 //        Log.v("View", "Triangles drawn: " + Tile.trisDrawn);
 
-        // Idea: Loop over the tile layer zoomed out one step. For each outer tile, see if all its
-        // inner (zoomed in) tiles are loaded. If not, fall back to rendering the zoomed out tile
-        // (to avoid freezing the app while loading tiles from disk). This also allows us to blend
-        // two neighboring tile layers easily.
-        int shift = Constants.TILE_SHIFT_DIFFS[layer];
-        int tx0p1 = tx0 >> shift, ty0p1 = ty0 >> shift, tx1p1 = tx1 >> shift, ty1p1 = ty1 >> shift;
-        for (int typ1 = ty0p1; typ1 <= ty1p1; ++typ1) {
-            for (int txp1 = tx0p1; txp1 <= tx1p1; ++txp1) {
-                boolean useOuterTile = false;
-                int zoomedOutTilePos = getTilePos(layer + 1, txp1, typ1);
-
-                if (layer+1 < Constants.TILE_SHIFTS.length) {
-                    // If the zoomed out tile is loaded, use it if at least 1 zoomed in tile is
-                    // not loaded. Otherwise, use it if at least 2 zoomed in tiles are not loaded.
-                    // (Since we have to load the zoomed out tile anyway.)
-                    int minTilesNotLoaded = tileCache.cache.containsKey(zoomedOutTilePos) ? 1 : 2;
-                    int tilesNotLoaded = 0;
-
-                    // loop over all (max 16 for shift diff 2) tiles in the outer tile and see if they're loaded
-                    innerTilesLoop:
-                    for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {
-                        for (int tx = Math.max(tx0, txp1 << shift); tx <= Math.min(tx1, (txp1 + 1 << shift) - 1); ++tx) {
-                            int tp = getTilePos(layer, tx, ty);
-                            if (tileCache.existingTiles.contains(tp) && !tileCache.cache.containsKey(tp)) {
-                                if (++tilesNotLoaded == minTilesNotLoaded) {
-                                    useOuterTile = true;
-                                    break innerTilesLoop;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // draw tiles
-                if (useOuterTile) {
-                    // we don't have all zoomed in tiles loaded, so fall back to zoomed out tile
-                    Tile tile = tileCache.get(zoomedOutTilePos, true);
-                    if (tile != null)
-                        tile.draw(glProgram, 1.0f);
-
-                    // if blending, only draw tiles that are loaded (to avoid stalling pipeline)
-                    float blend = 1 - (blendLayer - layer);
-                    if (blend > 0) {
-                        GLES20.glEnable(GLES20.GL_BLEND);
-                        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
-                        for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {
-                            for (int tx = Math.max(tx0, txp1 << shift); tx <= Math.min(tx1, (txp1 + 1 << shift) - 1); ++tx) {
-                                int tp = getTilePos(layer, tx, ty);
-                                if (tileCache.cache.containsKey(tp))
-                                    tileCache.get(tp, true).draw(glProgram, 1.0f);
-                            }
-                        }
-                        GLES20.glDisable(GLES20.GL_BLEND);
-                    } else if (blend < 0) {
-                        throw new IllegalStateException("Unexpected blend: "+blend);
-                    }
-                } else {
-                    // always draw zoomed in tiles first and without blending
-                    for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {
-                        for (int tx = Math.max(tx0, txp1 << shift); tx <= Math.min(tx1, (txp1 + 1 << shift) - 1); ++tx) {
-                            int tp = getTilePos(layer, tx, ty);
-                            Tile tile = tileCache.get(tp, true);
-                            if (tile != null)
-                                tile.draw(glProgram, 1.0f);
-                        }
-                    }
-
-                    // optional blending layer (zoomed out)
-                    if (layer < Constants.TILE_SHIFTS.length - 1) {
-                        float blend = blendLayer - layer;
-                        if (blend > 0) {
-                            GLES20.glEnable(GLES20.GL_BLEND);
-                            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
-                            Tile tile = tileCache.get(zoomedOutTilePos, true);
-                            if (tile != null)
-                                tile.draw(glProgram, blend);
-                            GLES20.glDisable(GLES20.GL_BLEND);
-                        } else if (blend < 0) {
-                            throw new IllegalStateException("Unexpected blend: "+blend);
-                        }
-                    }
-                }
-            }
-        }
+//        // Idea: Loop over the tile layer zoomed out one step. For each outer tile, see if all its
+//        // inner (zoomed in) tiles are loaded. If not, fall back to rendering the zoomed out tile
+//        // (to avoid freezing the app while loading tiles from disk). This also allows us to blend
+//        // two neighboring tile layers easily.
+//        int shift = Constants.TILE_SHIFT_DIFFS[layer];
+//        int tx0p1 = tx0 >> shift, ty0p1 = ty0 >> shift, tx1p1 = tx1 >> shift, ty1p1 = ty1 >> shift;
+//        for (int typ1 = ty0p1; typ1 <= ty1p1; ++typ1) {
+//            for (int txp1 = tx0p1; txp1 <= tx1p1; ++txp1) {
+//                boolean useOuterTile = false;
+//                int zoomedOutTilePos = getTilePos(layer + 1, txp1, typ1);
+//
+//                if (layer+1 < Constants.TILE_SHIFTS.length) {
+//                    // If the zoomed out tile is loaded, use it if at least 1 zoomed in tile is
+//                    // not loaded. Otherwise, use it if at least 2 zoomed in tiles are not loaded.
+//                    // (Since we have to load the zoomed out tile anyway.)
+//                    int minTilesNotLoaded = tileCache.cache.containsKey(zoomedOutTilePos) ? 1 : 2;
+//                    int tilesNotLoaded = 0;
+//
+//                    // loop over all (max 16 for shift diff 2) tiles in the outer tile and see if they're loaded
+//                    innerTilesLoop:
+//                    for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {
+//                        for (int tx = Math.max(tx0, txp1 << shift); tx <= Math.min(tx1, (txp1 + 1 << shift) - 1); ++tx) {
+//                            int tp = getTilePos(layer, tx, ty);
+//                            if (tileCache.existingTiles.contains(tp) && !tileCache.cache.containsKey(tp)) {
+//                                if (++tilesNotLoaded == minTilesNotLoaded) {
+//                                    useOuterTile = true;
+//                                    break innerTilesLoop;
+//                                }
+//                            }
+//                        }
+//                    }
+//                }
+//
+//                // draw tiles
+//                if (useOuterTile) {
+//                    // we don't have all zoomed in tiles loaded, so fall back to zoomed out tile
+//                    Tile tile = tileCache.get(zoomedOutTilePos, true);
+//                    if (tile != null)
+//                        tile.draw(glProgram, 1.0f);
+//
+//                    // if blending, only draw tiles that are loaded (to avoid stalling pipeline)
+//                    float blend = 1 - (blendLayer - layer);
+//                    if (blend > 0) {
+//                        GLES20.glEnable(GLES20.GL_BLEND);
+//                        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+//                        for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {
+//                            for (int tx = Math.max(tx0, txp1 << shift); tx <= Math.min(tx1, (txp1 + 1 << shift) - 1); ++tx) {
+//                                int tp = getTilePos(layer, tx, ty);
+//                                if (tileCache.cache.containsKey(tp))
+//                                    tileCache.get(tp, true).draw(glProgram, 1.0f);
+//                            }
+//                        }
+//                        GLES20.glDisable(GLES20.GL_BLEND);
+//                    } else if (blend < 0) {
+//                        throw new IllegalStateException("Unexpected blend: "+blend);
+//                    }
+//                } else {
+//                    // always draw zoomed in tiles first and without blending
+//                    for (int ty = Math.max(ty0, typ1 << shift); ty <= Math.min(ty1, (typ1 + 1 << shift) - 1); ++ty) {
+//                        for (int tx = Math.max(tx0, txp1 << shift); tx <= Math.min(tx1, (txp1 + 1 << shift) - 1); ++tx) {
+//                            int tp = getTilePos(layer, tx, ty);
+//                            Tile tile = tileCache.get(tp, true);
+//                            if (tile != null)
+//                                tile.draw(glProgram, 1.0f);
+//                        }
+//                    }
+//
+//                    // optional blending layer (zoomed out)
+//                    if (layer < Constants.TILE_SHIFTS.length - 1) {
+//                        float blend = blendLayer - layer;
+//                        if (blend > 0) {
+//                            GLES20.glEnable(GLES20.GL_BLEND);
+//                            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+//                            Tile tile = tileCache.get(zoomedOutTilePos, true);
+//                            if (tile != null)
+//                                tile.draw(glProgram, blend);
+//                            GLES20.glDisable(GLES20.GL_BLEND);
+//                        } else if (blend < 0) {
+//                            throw new IllegalStateException("Unexpected blend: "+blend);
+//                        }
+//                    }
+//                }
+//            }
+//        }
 
 //        tileCache.get(738032, true).draw(glProgram, 1.0f); // for debugging
 

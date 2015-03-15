@@ -55,8 +55,18 @@ public class Common {
         return Constants.LAYER_SHIFTS.length;
     }
 
+    public static final int getTilePos(int layer, int tx, int ty) {
+        // layer: 4 bits (0-15)
+        // tx/ty: 14 bits (0-16383)
+        return (layer << 28) + (tx << 14) + ty;
+    }
+
+    public static final int getLayer(int tilePos) { return tilePos >>> 28; }
+    public static final int getTX(int tilePos) { return (tilePos >> 14) & 0x3fff; }
+    public static final int getTY(int tilePos) { return tilePos & 0x3fff; }
+
     public static String getTilePosStr(int tilePos) {
-        return ChoreographerRenderThread.getLayer(tilePos) + ", " + ChoreographerRenderThread.getTX(tilePos) + ", " + ChoreographerRenderThread.getTY(tilePos);
+        return getLayer(tilePos) + ", " + getTX(tilePos) + ", " + getTY(tilePos);
     }
 
     public static float[] rgb(int rgb) {
