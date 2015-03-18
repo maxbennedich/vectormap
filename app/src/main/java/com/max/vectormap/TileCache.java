@@ -96,31 +96,15 @@ public class TileCache {
         return System.nanoTime()/1e9f;
     }
 
-//    float getTimeFirstDrawn(int tp) {
-//        Float t = timeFirstDrawn.get(tp);
-//        if (t == null)
-//            timeFirstDrawn.put(tp, t = getGlobalTimeInSeconds()); // TODO should subtract frame time!
-//        return t;
-//    }
-
     public boolean isLoaded(int tp) {
         return cache.containsKey(tp);
     }
 
     private BlendedTile tile(int tp) {
-        float blend;
-        Float lastDrawn = timeLastDrawn.get(tp);
-        if (lastDrawn != null) {
-            // blending out
-            if (timeFirstDrawn.containsKey(tp)) throw new AssertionError("Tile "+Common.getTilePosStr(tp)+" in both first and last drawn!");
-            blend = Math.max(0, 1 - (getGlobalTimeInSeconds() - lastDrawn));
-        } else {
-            // blending in
-            Float firstDrawn = timeFirstDrawn.get(tp);
-            if (firstDrawn == null)
-                timeFirstDrawn.put(tp, firstDrawn = getGlobalTimeInSeconds()); // TODO should subtract frame time!
-            blend = Math.min(1, getGlobalTimeInSeconds() - firstDrawn);
-        }
+        Float firstDrawn = timeFirstDrawn.get(tp);
+        if (firstDrawn == null)
+            timeFirstDrawn.put(tp, firstDrawn = getGlobalTimeInSeconds()); // TODO should subtract frame time!
+        float blend = Math.min(1, getGlobalTimeInSeconds() - firstDrawn);
         return new BlendedTile(tp, blend);
     }
 
@@ -156,11 +140,12 @@ public class TileCache {
             int tp = it.next();
             if (!allDrawn.contains(tp)) {
                 it.remove();
+                timeLastDrawn.remove(tp);
 //                timeLastDrawn.put(tp, getGlobalTimeInSeconds());
             }
         }
 
-        Log.d("DrawOrder", drawOrder.toString());
+        Log.d("DrawOrder", "layer="+minLayerDrawn+": "+drawOrder.toString());
 
         return drawOrder;
     }
@@ -175,22 +160,30 @@ public class TileCache {
         // draw tile if either within the given scale, or it's more zoomed in but still blending out (recently removed)
         int layer = Common.getLayer(tp);
         if (isLoaded(tp) && (layer >= minLayerDrawn || blendingOut(tp)))
-            if (!allChildrenCovered(tp, minLayerDrawn) || blendingIn(tp, drawOrder))
-                drawOrder.add(0, tile(tp));
+            if (!allChildrenCovered(tp, minLayerDrawn) || blendingIn(tp, drawOrder)) {
+                // if tile is blended and has children, blend children instead (since children are drawn after this tile)
+                Log.d("DrawOrder", "tp="+Common.getTilePosStr(tp)+", blendingout="+blendingOut(tp)+", childrencovered="+allChildrenCovered(tp, minLayerDrawn)+", blendingin="+blendingIn(tp, drawOrder));
+                BlendedTile bt = tile(tp);
+                if (bt.blend < 1 && !drawOrder.isEmpty()) {
+                    float childBlend = 1 - bt.blend;
+                    bt.blend = 1;
+                    for (BlendedTile child : drawOrder)
+                        child.blend = childBlend;
+                }
+
+                drawOrder.add(0, bt);
+                if (layer >= minLayerDrawn)
+                    timeLastDrawn.put(tp, getGlobalTimeInSeconds());
+            }
 
         return drawOrder;
     }
 
     /** Whether tile has been removed and is still blending out. */
     private boolean blendingOut(int tp) {
-        if(true)return false; // TODO
         Float t = timeLastDrawn.get(tp);
         if (t == null) return false;
-        if (getGlobalTimeInSeconds() - t >= 1) {
-            timeLastDrawn.remove(tp); // finished blending, remove tile
-            return false;
-        }
-        return true;
+        return getGlobalTimeInSeconds() - t < 1;
     }
 
     /**
