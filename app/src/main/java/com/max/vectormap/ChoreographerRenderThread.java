@@ -219,7 +219,7 @@ public class ChoreographerRenderThread extends Thread {
             frameScaleFactor = globalScaleFactor;
         }
 
-        update(timeStampNanos);
+        float elapsedSeconds = update(timeStampNanos);
 
         // If we're not keeping up 60fps -- maybe something in the system is busy, maybe
         // recording is too expensive, maybe the CPU frequency governor thinks we're
@@ -233,7 +233,7 @@ public class ChoreographerRenderThread extends Thread {
             return;
         }
 
-        draw();
+        draw(elapsedSeconds);
         mWindowSurface.swapBuffers();
     }
 
@@ -270,7 +270,7 @@ public class ChoreographerRenderThread extends Thread {
      * moves.  Ideally this will yield identical animation sequences regardless of
      * the device's actual refresh rate.
      */
-    private void update(long timeStampNanos) {
+    private float update(long timeStampNanos) {
         // Compute time from previous frame.
         long intervalNanos;
         if (mPrevTimeNanos == 0) {
@@ -297,10 +297,12 @@ public class ChoreographerRenderThread extends Thread {
             blendLayer = Math.min(currentLayer, blendLayer + elapsedSeconds);
         else if (currentLayer < blendLayer)
             blendLayer = Math.max(currentLayer, blendLayer - elapsedSeconds);
+
+        return elapsedSeconds;
     }
 
     /** Draws the scene. */
-    private void draw() {
+    private void draw(float elapsedSeconds) {
         GlUtil.checkGlError("draw start");
 
         startOnDrawNanoTime = System.nanoTime();
@@ -330,7 +332,7 @@ public class ChoreographerRenderThread extends Thread {
 
         Tile.trisDrawn = 0;
 
-        for (BlendedTile blendedTile : tileCache.getDrawOrder(screenEdges, frameScaleFactor)) {
+        for (BlendedTile blendedTile : tileCache.getDrawOrder(screenEdges, frameScaleFactor, elapsedSeconds)) {
             if (blendedTile.blend < 1) {
                 GLES20.glEnable(GLES20.GL_BLEND);
                 GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
