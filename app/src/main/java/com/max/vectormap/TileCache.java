@@ -160,7 +160,7 @@ public class TileCache {
     private static final TileNode getRootNode() { return new TileNode(-1, -1, -1, 0, null); }
 
     TileNode prevRootNode = getRootNode();
-
+    
     public List<BlendedTile> getDrawOrder(int[] screenEdges, float scaleFactor, float elapsedTime) {
         this.screenEdges = screenEdges;
 
@@ -187,16 +187,6 @@ public class TileCache {
             hideParentsOverdrawnByChildren(topNode);
 
         List<BlendedTile> drawOrder = getDrawOrderFromTree(rootNode);
-
-//        List<BlendedTile> drawOrderInc0 = getDrawOrderFromTreeInc0(rootNode);
-//
-//        System.out.println("with 0: " + drawOrderInc0);
-//        System.out.println("wi/o 0: " + drawOrder);
-//        Log.d("DrawOrder", "Desired layer=" + desiredLayer + ", draw order: " + drawOrder);
-
-        drawnTilePos.clear();
-        for (BlendedTile drawn : drawOrder)
-            drawnTilePos.add(drawn.tilePos);
 
         prevRootNode = rootNode;
         if (prevScreenEdges == null)
@@ -283,7 +273,6 @@ public class TileCache {
 
     private void updateTreeWithOnScreenTiles(TileNode node, TileNode parent, Map<Integer, TileNode> newNodeByPos) {
         if (node.layer >= 0) {
-//            System.out.printf("ONSCREEN: %s (parent: %s)%n", node, parent);
             TileNode newParent = newNodeByPos.get(parent.tp()); // this is guaranteed to exist since we would have added it in a previous call otherwise
             TileNode newChild = new TileNode(node.layer, node.tx, node.ty, node.blend, newParent);
             if (!newParent.children.contains(newChild)) {
@@ -292,8 +281,6 @@ public class TileCache {
             } else {
                 for (TileNode child : newParent.children) {
                     if (child.equals(newChild)) {
-//                        System.out.println("Child blend "+Common.getTilePosStr(Common.getTilePos(child.layer, child.tx, child.ty))+" set to blend for node "+
-//                                Common.getTilePosStr(Common.getTilePos(node.layer, node.tx, node.ty))+" :"+node.blend);
                         child.blend = fullyOverdrawn(node) ? 1 : node.blend; // carry over blend from previously drawn tree TODO optimize
                         break;
                     }
@@ -319,7 +306,6 @@ public class TileCache {
         // and start blended in if tile was panned into view
         // (if tile not was not just added, the blend value will be overwritten with the value from the previously drawn tree)
         float initialBlend = prevScreenEdges != null && onScreen(tp, prevScreenEdges) ? 0 : 1;
-//        System.out.println("Initial blend for "+Common.getTilePosStr(tp)+": "+initialBlend);
         TileNode node = new TileNode(layer, tx, ty, initialBlend, parent);
         if (layer > desiredLayer) {
             LinkedHashSet<TileNode> children = new LinkedHashSet<>();
