@@ -95,8 +95,9 @@ public class TileCache {
     }
 
     static class TileNode {
-        int layer;
-        int tx, ty;
+        final int layer;
+        final int tx, ty;
+        final int tp;
         float blend;
         /** Blend as actually drawn. Differs from blend since parents whose children are all drawn get a draw blend of 0 although their actual blend might still be 1. */
         float drawnBlend;
@@ -107,6 +108,7 @@ public class TileCache {
             this.layer = layer;
             this.tx = tx;
             this.ty = ty;
+            this.tp = Common.getTilePos(layer, tx, ty);
             this.blend = blend;
             this.parent = parent;
             this.children = new LinkedHashSet<>();
@@ -174,11 +176,8 @@ public class TileCache {
             for (int tx = txy[0]; tx <= txy[2]; ++tx)
                 rootNode.children.add(visit(Common.getTilePos(Constants.TOP_LAYER, tx, ty), desiredLayer, rootNode));
 
-        Map<Integer, TileNode> tileNodeByPos = new HashMap<>();
-        addNodeToMap(rootNode, tileNodeByPos);
-
         // update draw order with any on-screen tiles from the last round; also updates all blend values from the previously drawn tree
-        updateTreeWithOnScreenTiles(prevRootNode, null, tileNodeByPos);
+        updateTreeWithOnScreenTiles(prevRootNode, rootNode);
 
         // update blend values; blend in and out depending on if tile layer is within the desired range of layers
         updateBlending(rootNode, desiredLayer, elapsedTime);
@@ -187,6 +186,12 @@ public class TileCache {
             hideParentsOverdrawnByChildren(topNode);
 
         List<BlendedTile> drawOrder = getDrawOrderFromTree(rootNode);
+
+        Log.d("DrawOrder", drawOrder.toString());
+
+        drawnTilePos.clear();
+        for (BlendedTile drawn : drawOrder)
+            drawnTilePos.add(drawn.tilePos);
 
         prevRootNode = rootNode;
         if (prevScreenEdges == null)
@@ -201,7 +206,7 @@ public class TileCache {
         int layer = Common.getLayer(tp), tx = Common.getTX(tp), ty = Common.getTY(tp);
         // if tile was just added, start blended out if it would have been visible last frame (to prevent "popping"),
         // and start blended in if tile was panned into view
-        // (if tile not was not just added, the blend value will be overwritten with the value from the previously drawn tree)
+        // (if tile was not just added, the blend value will be overwritten with the value from the previously drawn tree)
         float initialBlend = prevScreenEdges != null && onScreen(tp, prevScreenEdges) ? 0 : 1;
         TileNode node = new TileNode(layer, tx, ty, initialBlend, parent);
         if (layer > desiredLayer) {
@@ -217,31 +222,22 @@ public class TileCache {
         return node;
     }
 
-    private void addNodeToMap(TileNode node, Map<Integer, TileNode> tileNodeByPos) {
-        tileNodeByPos.put(node.tp(), node);
-        for (TileNode child : node.children)
-            addNodeToMap(child, tileNodeByPos);
-    }
+    /** update draw order with any on-screen tiles from the last round; also updates all blend values from the previously drawn tree */
+    private void updateTreeWithOnScreenTiles(TileNode node, TileNode newNode) {
+        if (node.layer >= 0)
+            newNode.blend = fullyOverdrawn(node) ? 1 : node.blend; // carry over blend from previously drawn tree TODO optimize
 
-    private void updateTreeWithOnScreenTiles(TileNode node, TileNode parent, Map<Integer, TileNode> newNodeByPos) {
-        if (node.layer >= 0) {
-            TileNode newParent = newNodeByPos.get(parent.tp()); // this is guaranteed to exist since we would have added it in a previous call otherwise
-            TileNode newChild = new TileNode(node.layer, node.tx, node.ty, node.blend, newParent);
-            if (!newParent.children.contains(newChild)) {
-                newParent.children.add(newChild);
-                newNodeByPos.put(newChild.tp(), newChild);
-            } else {
-                for (TileNode child : newParent.children) {
-                    if (child.equals(newChild)) {
-                        child.blend = fullyOverdrawn(node) ? 1 : node.blend; // carry over blend from previously drawn tree TODO optimize
-                        break;
-                    }
+        for (TileNode child : node.children) {
+            if (onScreen(child.tp, screenEdges)) {
+                TileNode newChild = findChild(newNode, child.tx, child.ty);
+                if (newChild == null) {
+                    // tile does not exist in new tree; create it
+                    newChild = new TileNode(child.layer, child.tx, child.ty, child.blend, newNode);
+                    newNode.children.add(newChild);
                 }
+                updateTreeWithOnScreenTiles(child, newChild);
             }
         }
-        for (TileNode child : node.children)
-            if (onScreen(Common.getTilePos(child.layer, child.tx, child.ty), screenEdges))
-                updateTreeWithOnScreenTiles(child, node, newNodeByPos);
     }
 
     /** @return Whether any part of the tile is on screen. */
@@ -256,14 +252,14 @@ public class TileCache {
     private boolean updateBlending(TileNode node, int desiredLayer, float elapsedTime) {
         boolean blendedOut = false;
         if (node.parent != null) { // exclude root node
-            if (!isLoaded(Common.getTilePos(node.layer, node.tx, node.ty))) {
+            if (!isLoaded(node.tp)) {
                 node.blend = 0; // tiles not loaded always get blend 0
             } else if (node.layer >= desiredLayer) {
                 node.blend = Math.min(1, node.blend + elapsedTime);
             } else {
                 // don't start blending out until any parent up until the desired layer is loaded
                 for (TileNode parentAtDesiredLayer = node.parent; parentAtDesiredLayer.layer <= desiredLayer && parentAtDesiredLayer.layer != -1; parentAtDesiredLayer = parentAtDesiredLayer.parent) {
-                    if (isLoaded(Common.getTilePos(parentAtDesiredLayer.layer, parentAtDesiredLayer.tx, parentAtDesiredLayer.ty))) {
+                    if (isLoaded(parentAtDesiredLayer.tp)) {
                         node.blend = Math.max(0, node.blend - elapsedTime);
                         blendedOut = node.blend == 0;
                         break;
@@ -303,7 +299,7 @@ public class TileCache {
         for (int y = Math.max(node.ty << shift, txy[1]); y <= Math.min((node.ty + 1 << shift) - 1, txy[3]); ++y) {
             for (int x = Math.max(node.tx << shift, txy[0]); x <= Math.min((node.tx + 1 << shift) - 1, txy[2]); ++x) {
                 TileNode child = findChild(node, x, y);
-                if (child == null || ((child.blend < 1 || !isLoaded(Common.getTilePos(child.layer, child.tx, child.ty))) && !fullyOverdrawn(child))) {
+                if (child == null || ((child.blend < 1 || !isLoaded(child.tp)) && !fullyOverdrawn(child))) {
                     allChildrenFullyDrawn = false;
                     break outer;
                 }
@@ -313,9 +309,9 @@ public class TileCache {
         return allChildrenFullyDrawn;
     }
 
-    private TileNode findChild(TileNode parent, int x, int y) {
+    private TileNode findChild(TileNode parent, int tx, int ty) {
         for (TileNode child : parent.children)
-            if (child.tx == x && child.ty == y)
+            if (child.tx == tx && child.ty == ty)
                 return child;
         return null;
     }
@@ -329,7 +325,7 @@ public class TileCache {
 
     private void addTreeRecursively(List<BlendedTile> drawOrder, TileNode node) {
         if (node.drawnBlend > 0)
-            drawOrder.add(new BlendedTile(node.tp(), node.drawnBlend));
+            drawOrder.add(new BlendedTile(node.tp, node.drawnBlend));
         for (TileNode child : node.children)
             addTreeRecursively(drawOrder, child);
     }

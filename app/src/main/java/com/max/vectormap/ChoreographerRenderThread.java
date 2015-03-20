@@ -440,7 +440,7 @@ public class ChoreographerRenderThread extends Thread {
 
 //        tileCache.get(738032, true).draw(glProgram, 1.0f); // for debugging
 
-        logFPS();
+//        logFPS();
 
         GlUtil.checkGlError("draw done");
     }
