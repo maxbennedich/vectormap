@@ -328,11 +328,13 @@ public class ChoreographerRenderThread extends Thread {
 //        Log.v("TileCache", String.format("GPUx: %.0f kb", Tile.gpuBytes / 1024.0));
 //        Log.v("TileCache", "Free vertex/index buffers: " + Tile.getFreeVertexBufferCount() + " / " + Tile.getFreeIndexBufferCount());
 
+        List<BlendedTile> tilesToDraw = tileCache.getDrawOrder(screenEdges, frameScaleFactor, elapsedSeconds);
+
         tileCache.refreshForPosition(screenEdges, frameScaleFactor, layer);
 
         Tile.trisDrawn = 0;
 
-        for (BlendedTile blendedTile : tileCache.getDrawOrder(screenEdges, frameScaleFactor, elapsedSeconds)) {
+        for (BlendedTile blendedTile : tilesToDraw) {
             if (blendedTile.blend < 1) {
                 GLES20.glEnable(GLES20.GL_BLEND);
                 GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
@@ -438,7 +440,7 @@ public class ChoreographerRenderThread extends Thread {
 
 //        tileCache.get(738032, true).draw(glProgram, 1.0f); // for debugging
 
-//        logFPS();
+        logFPS();
 
         GlUtil.checkGlError("draw done");
     }
