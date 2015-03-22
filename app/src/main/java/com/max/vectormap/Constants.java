@@ -7,6 +7,9 @@ public class Constants {
 
     public static final long ONE_SECOND_NANOS = 1000000000L;
 
+    /** 1 = 1 second to blend between layers; 2 = 0.5 seconds, etc. */
+    public static final float LAYER_BLEND_SPEED = 3f;
+
     public static final int NR_SURFACE_TYPES = 10;
 
     public static final int GLOBAL_OFS_X = 400000;
