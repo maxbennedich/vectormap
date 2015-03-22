@@ -278,8 +278,8 @@ public class TileCache {
         return drawnTilePos.contains(tp);
     }
 
-    private int[] tilesToLoadSorted = new int[512];
-    private int[] tilesToLoad = new int[512];
+    private int[] tilesToLoadSorted = new int[1024]; // 512 not enough for landscape mode
+    private int[] tilesToLoad = new int[1024];
     int tilesToLoadCount = 0;
 
     private int layerOld = -1;

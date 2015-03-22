@@ -53,6 +53,7 @@ public class ChoreographerRenderThread extends Thread {
     private final float[] mViewMatrix = new float[16];
 
     private float screenRatio;
+    private int screenWidth, screenHeight;
     private float nearPlane = 0.01f;
 
     /**
@@ -186,6 +187,8 @@ public class ChoreographerRenderThread extends Thread {
         GLES20.glViewport(0, 0, width, height);
 
         screenRatio = (float) width / height;
+        screenWidth = width;
+        screenHeight = height;
 
         // this projection matrix is applied to object coordinates in the onDrawFrame() method
         Matrix.frustumM(mProjectionMatrix, 0, -screenRatio, screenRatio, -1f, 1f, nearPlane, 16384);
@@ -248,8 +251,12 @@ public class ChoreographerRenderThread extends Thread {
         prevNanoTime = time;
     }
 
-    private float getCameraDistance() {
+    float getCameraDistance() {
         return 1000*1024 / frameScaleFactor;
+    }
+
+    public final float pixelToUtm(float pixel) {
+        return pixel / screenHeight * 2 * getCameraDistance() / nearPlane;
     }
 
     /** x0, y0, x1, y1 (utm coordinates) */

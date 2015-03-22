@@ -128,11 +128,6 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
 
     float screenMidX, screenMidY;
 
-    final float pixelToUtm(float pixel) {
-        // using camera
-        return pixel * 1e5f / mRenderThread.globalScaleFactor;
-    }
-
     enum ActionMode { NONE, PAN, ZOOM }
 
     private ScaleGestureDetector zoomDetector;
@@ -155,8 +150,8 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
                     panPrevY = event.getY();
 
                     synchronized (mRenderThread.CAMERA_POSITION_LOCK) {
-                        mRenderThread.globalCenterUtmX -= pixelToUtm(dx);
-                        mRenderThread.globalCenterUtmY += pixelToUtm(dy);
+                        mRenderThread.globalCenterUtmX -= mRenderThread.pixelToUtm(dx);
+                        mRenderThread.globalCenterUtmY += mRenderThread.pixelToUtm(dy);
                     }
 
 //                    mapCenterUpdated();
@@ -211,8 +206,8 @@ public class ChoreographerActivity extends Activity implements SurfaceHolder.Cal
 
                 // translate due to focus point moving and zoom due to pinch
                 float omScale = 1 - mRenderThread.globalScaleFactor / oldScaleFactor;
-                mRenderThread.globalCenterUtmX += pixelToUtm((screenMidX - focusX) * omScale - focusX + prevFocusX);
-                mRenderThread.globalCenterUtmY -= pixelToUtm((screenMidY - focusY) * omScale - focusY + prevFocusY);
+                mRenderThread.globalCenterUtmX += mRenderThread.pixelToUtm((screenMidX - focusX) * omScale - focusX + prevFocusX);
+                mRenderThread.globalCenterUtmY -= mRenderThread.pixelToUtm((screenMidY - focusY) * omScale - focusY + prevFocusY);
 
 //             mapCenterUpdated();
             }
