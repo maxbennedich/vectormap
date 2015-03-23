@@ -159,7 +159,7 @@ public class TileCache {
 
         getDrawOrderFromTree(rootNode);
 
-        // TODO don't this
+        // TODO something smarter; this is needed so to not remove tiles currently drawn
         drawnTilePos.clear();
         for (int k = 0; k < nrDrawnTiles; ++k)
             drawnTilePos.add(drawnTilePosArray[k]);
@@ -288,9 +288,8 @@ public class TileCache {
     /**
      * Based on camera position and potentially other factors, figure out which tiles are either
      * needed right away or could be needed within short (e.g. if user pans or zooms).
-     * TODO this creates too many tiles when zoomed out too much
-     * TODO BUG: when switching layers, need to load tiles for both layers, also when zooming
-     * TODO: out too quickly, it ends up wanting to load way too many tiles
+     * TODO: In landscape mode, this frequently ends up wanting to load >512 tiles, is that
+     * TODO: really needed?
      */
     public void refreshForPosition(int[] screenEdges, float scaleFactor, int layer) {
         // first figure out if potential set of tiles to load changed from previous frame
