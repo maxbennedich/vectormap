@@ -30,13 +30,16 @@ public class TextRenderer {
             391,199,410,220,2,-40, 411,199,421,220,2,-40, 422,199,444,220,0,-39, 445,199,483,219,11,-40, 484,199,497,216,2,-9, 1,239,43,254,4,-22,
             44,239,57,253,2,-9, 58,239,83,251,1,-21, 84,239,117,250,0,7, 118,239,131,250,8,-42};
 
-//    private int textureWidth, textureHeight; // must be power of 2
+    private int textureWidth, textureHeight; // will be powers of 2
 //    private static final int FORMAT = GLES20.GL_RGBA;
 //    private static final int BYTES_PER_PIXEL = 4;   // RGBA
 
     private int fontTextureHandle;
 
     private int fontProgram;
+
+    /** Scaling factors to make the text look the same regardless of screen orientation. */
+    public float xScale = 1, yScale = 1;
 
     public TextRenderer(Context context) {
         loadTexture(context, R.drawable.font_56_512_256);
@@ -57,6 +60,8 @@ public class TextRenderer {
         options.inScaled = false; // No pre-scaling
 
         Bitmap bitmap = BitmapFactory.decodeResource(context.getResources(), resourceId, options);
+        textureWidth = bitmap.getWidth();
+        textureHeight = bitmap.getHeight();
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0]);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
@@ -71,41 +76,73 @@ public class TextRenderer {
     }
 
     static final int COORDS_PER_VERTEX = 3;
-    static float squareCoords[] = {
-            -0.98f,  0.98f, 0.0f,   // top left
-            -0.98f, 0.9f, 0.0f,   // bottom left
-            0.20f, 0.9f, 0.0f,   // bottom right
-            0.20f,  0.98f, 0.0f }; // top right
-//    static float squareCoords[] = {
-//            -0.98f,  0.98f, 0.0f,   // top left
-//            -0.98f, 0.82f, 0.0f,   // bottom left
-//            0.98f, 0.82f, 0.0f,   // bottom right
-//            0.98f,  0.98f, 0.0f }; // top right
-//    static float squareCoords[] = {
-//            -0.98f,  0.98f, 0.0f,   // top left
-//            -0.98f, 0.94f, 0.0f,   // bottom left
-//            -0.5f, 0.94f, 0.0f,   // bottom right
-//            -0.5f,  0.98f, 0.0f }; // top right
+    static float vertexCoords[];
 
     static final int TEX_COORDS_PER_VERTEX = 2;
-    static float texCoords[] = {
-            0, 0.605f,   // top left
-            0, 0.77f,   // bottom left
-            1, 0.77f,   // bottom right
-            1, 0.605f }; // top right
+    static float texCoords[];
 
-    private final short drawOrder[] = { 0, 1, 2, 0, 2, 3 }; // order to draw vertices
+    private short drawOrder[]; // order to draw vertices
 
     private FloatBuffer vertexBuffer;
     private FloatBuffer texCoordsBuffer;
     private ShortBuffer drawListBuffer;
 
-    {
+    /** x/y range -1 to 1, with (-1,1) is top left corner */
+    public void drawText(String text, float x, float y, float size, float[] color) {
+        // order: top left, bottom left, bottom right, top right
+        vertexCoords = new float[text.length() * 4 * COORDS_PER_VERTEX];
+        texCoords = new float[text.length() * 4 * TEX_COORDS_PER_VERTEX];
+        drawOrder = new short[text.length() * 6];
+
+//        float vx = -0.98f, vy = 0.93f;
+        float vx = x, vy = y;
+        for (int k = 0; k < text.length(); ++k) {
+            int ch = text.charAt(k);
+            int chIdx = ALPHABET.indexOf(ch) * 6;
+            if (chIdx < 0) {
+                vx += size * xScale * 0.0018f;
+                continue;
+            }
+
+            float chWidth = size * xScale * 0.0001f * (CHAR_POS[chIdx + 2] - CHAR_POS[chIdx]);
+            float chHeight = size * yScale * 0.0001f * (CHAR_POS[chIdx + 3] - CHAR_POS[chIdx + 1]);
+            float chXOfs = size * xScale * 0.0001f * CHAR_POS[chIdx + 4];
+            float chYOfs = - size * yScale * 0.0001f * CHAR_POS[chIdx + 5];
+
+            vertexCoords[k*12+0] = vx + chXOfs;
+            vertexCoords[k*12+1] = vy + chYOfs;
+            vertexCoords[k*12+3] = vx + chXOfs;
+            vertexCoords[k*12+4] = vy - chHeight + chYOfs;
+            vertexCoords[k*12+6] = vx + chWidth + chXOfs;
+            vertexCoords[k*12+7] = vy - chHeight + chYOfs;
+            vertexCoords[k*12+9] = vx + chWidth + chXOfs;
+            vertexCoords[k*12+10] = vy + chYOfs;
+            vertexCoords[k*12+2] = vertexCoords[k*12+5] = vertexCoords[k*12+8] = vertexCoords[k*12+11] = 0;
+
+            texCoords[k*8+0] = (float) CHAR_POS[chIdx] / textureWidth;
+            texCoords[k*8+1] = (float) CHAR_POS[chIdx + 1] / textureHeight;
+            texCoords[k*8+2] = (float) CHAR_POS[chIdx] / textureWidth;
+            texCoords[k*8+3] = (float) CHAR_POS[chIdx + 3] / textureHeight;
+            texCoords[k*8+4] = (float) CHAR_POS[chIdx + 2] / textureWidth;
+            texCoords[k*8+5] = (float) CHAR_POS[chIdx + 3] / textureHeight;
+            texCoords[k*8+6] = (float) CHAR_POS[chIdx + 2] / textureWidth;
+            texCoords[k*8+7] = (float) CHAR_POS[chIdx + 1] / textureHeight;
+
+            drawOrder[k*6+0] = (short)(k*4 + 0);
+            drawOrder[k*6+1] = (short)(k*4 + 1);
+            drawOrder[k*6+2] = (short)(k*4 + 2);
+            drawOrder[k*6+3] = (short)(k*4 + 0);
+            drawOrder[k*6+4] = (short)(k*4 + 2);
+            drawOrder[k*6+5] = (short)(k*4 + 3);
+
+            vx += chWidth;
+        }
+
         // initialize vertex byte buffer for shape coordinates
-        ByteBuffer bb = ByteBuffer.allocateDirect(squareCoords.length * Constants.BYTES_IN_FLOAT);
+        ByteBuffer bb = ByteBuffer.allocateDirect(vertexCoords.length * Constants.BYTES_IN_FLOAT);
         bb.order(ByteOrder.nativeOrder());
         vertexBuffer = bb.asFloatBuffer();
-        vertexBuffer.put(squareCoords);
+        vertexBuffer.put(vertexCoords);
         vertexBuffer.position(0);
 
         // initialize texture byte buffer
@@ -121,9 +158,7 @@ public class TextRenderer {
         drawListBuffer = dlb.asShortBuffer();
         drawListBuffer.put(drawOrder);
         drawListBuffer.position(0);
-    }
 
-    public void drawText(String text, int x, int y) {
         GLES20.glUseProgram(fontProgram);
 
         GLES20.glEnable(GLES20.GL_BLEND);
@@ -144,7 +179,6 @@ public class TextRenderer {
         GLES20.glEnableVertexAttribArray(texCoordinateHandle);
 
         int mColorHandle = GLES20.glGetUniformLocation(fontProgram, "vColor");
-        float[] color = {1, 1f, 1f, 1};
         GLES20.glUniform4fv(mColorHandle, 1, color, 0);
 
 //        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, 36);
@@ -153,5 +187,18 @@ public class TextRenderer {
                 GLES20.GL_UNSIGNED_SHORT, drawListBuffer);
 
         GLES20.glDisable(GLES20.GL_BLEND);
+    }
+
+    public void adjustForScreenSize(int width, int height) {
+        // make font appear the same size regardless of screen orientation
+        if (width < height) {
+            // portrait mode
+            xScale = 1;
+            yScale = (float)width / height;
+        } else {
+            // landscape mode
+            xScale = (float)height / width;
+            yScale = 1;
+        }
     }
 }

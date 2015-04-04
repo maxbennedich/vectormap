@@ -12,6 +12,8 @@ import com.max.vectormap.gles.EglCore;
 import com.max.vectormap.gles.GlUtil;
 import com.max.vectormap.gles.WindowSurface;
 
+import java.util.Random;
+
 /**
  * This class handles all OpenGL rendering.
  * <p>
@@ -42,6 +44,8 @@ public class ChoreographerRenderThread extends Thread {
 
     private TileCache tileCache;
 
+    private TextLayer textLayer;
+
     private final float[] mMVPMatrix = new float[16];
     private final float[] mProjectionMatrix = new float[16];
     private final float[] mViewMatrix = new float[16];
@@ -67,7 +71,7 @@ public class ChoreographerRenderThread extends Thread {
 
     private int glProgram;
 
-    private TextRenderer textRenderer;
+    private TextRenderer textRenderer = null;
 
     /**
      * Pass in the SurfaceView's SurfaceHolder.  Note the Surface may not yet exist.
@@ -77,6 +81,7 @@ public class ChoreographerRenderThread extends Thread {
         mSurfaceHolder = holder;
         this.context = context;
         tileCache = new TileCache(context);
+        textLayer = new TextLayer(context);
     }
 
     /**
@@ -182,6 +187,9 @@ public class ChoreographerRenderThread extends Thread {
 
         // this projection matrix is applied to object coordinates in the onDrawFrame() method
         Matrix.frustumM(mProjectionMatrix, 0, -screenRatio, screenRatio, -1f, 1f, nearPlane, 16384);
+
+        if (textRenderer != null)
+            textRenderer.adjustForScreenSize(width, height);
     }
 
     /**
@@ -237,7 +245,8 @@ public class ChoreographerRenderThread extends Thread {
         long time = System.nanoTime();
         long fpsTime = time - prevNanoTime;
         long onDrawTime = time - startOnDrawNanoTime;
-        Log.v("PerfLog", String.format("FPS: %.1f, time: %.1f ms, ondraw: %.1f ms, tris: %d", 1e9/fpsTime, fpsTime/1e6, onDrawTime/1e6, Tile.trisDrawn));
+//        textRenderer.drawText(String.format("FPS: %.1f, time: %.1f ms, ondraw: %.1f ms, tris: %d", 1e9 / fpsTime, fpsTime / 1e6, onDrawTime / 1e6, Tile.trisDrawn), 0, 0, 12);
+//        Log.v("PerfLog", String.format("FPS: %.1f, time: %.1f ms, ondraw: %.1f ms, tris: %d", 1e9/fpsTime, fpsTime/1e6, onDrawTime/1e6, Tile.trisDrawn));
         prevNanoTime = time;
     }
 
@@ -336,10 +345,39 @@ public class ChoreographerRenderThread extends Thread {
 
 //        tileCache.get(738032, true).draw(glProgram, 1.0f); // for debugging
 
-//        logFPS();
+        logFPS();
 
-        textRenderer.drawText(""+Tile.trisDrawn, 0, 0);
+        for (TextString string : textLayer.strings) {
+            float f = getCameraDistance() / nearPlane;
+            float fx = ((string.x - Constants.GLOBAL_OFS_X) - frameCenterUtmX) / (f * screenRatio);
+            float fy = ((string.y - Constants.GLOBAL_OFS_Y) - frameCenterUtmY) / f;
+
+            float[] textColor = {1, 1, 1, 0};
+            if (string.category == 9) {
+                textColor[3] = 1;
+            } else if (string.category == 7) {
+                if (frameScaleFactor < 16000 && frameScaleFactor > 8000)
+                    textColor[3] = (frameScaleFactor-8000)/(16000-8000);
+                else if (frameScaleFactor >= 16000)
+                    textColor[3] = 1;
+            } else if (string.category == 8) {
+                if (frameScaleFactor < 8000 && frameScaleFactor > 4000)
+                    textColor[3] = (frameScaleFactor-4000)/(8000-4000);
+                else if (frameScaleFactor >= 8000)
+                    textColor[3] = 1;
+            } else {
+                if (frameScaleFactor < 24000 && frameScaleFactor > 16000)
+                    textColor[3] = (frameScaleFactor-16000)/(24000-16000);
+                else if (frameScaleFactor >= 24000)
+                    textColor[3] = 1;
+            }
+            if (textColor[3] > 0 && fx > -1 && fx < 1 && fy > -1 && fy < 1)
+                textRenderer.drawText(string.text, fx, fy, string.category == 9 ? 16 : 12, textColor);
+        }
+//        textRenderer.drawText(Tile.trisDrawn + " tris drawn", 0, 0, 12);
 
         GlUtil.checkGlError("draw done");
     }
+
+    Random r = new Random();
 }
